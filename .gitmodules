@@ -1,0 +1,3 @@
+[submodule "socialjax"]
+	path = socialjax
+	url = https://github.com/cooperativex/SocialJax.git
