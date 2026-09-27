@@ -1,0 +1,14 @@
+#!/bin/bash
+
+environments=(pd_arena mushrooms gift harvest_closed)
+algorithms=(IPPO MAPPO SVO)
+
+for env in "${environments[@]}"; do
+    for algo in "${algorithms[@]}"; do
+        if [ "${algo}" = "IPPO" ] ; then 
+            uv run socialjax/algorithms/train.py --algo ${algo} --env ${env} reward=common
+        else
+            uv run socialjax/algorithms/train.py --algo ${algo} --env ${env}
+        fi
+    done
+done
