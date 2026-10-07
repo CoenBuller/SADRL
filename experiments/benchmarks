@@ -1,11 +1,4 @@
 #!/bin/bash
-
-export MPLCONFIGDIR="/local/s2631415/.cache/matplotlib"
-export UV_CACHE_DIR="/local/s2631415/.cache/uv"
-
-export PYTHONPATH="/local/s2631415/SADRL/socialjax:/local/s2631415/SADRL/socialjax/src:$PYTHONPATH"
-
-
 environments=(pd_arena mushrooms gift cleanup)
 algorithms=(IPPO MAPPO SVO)
 
