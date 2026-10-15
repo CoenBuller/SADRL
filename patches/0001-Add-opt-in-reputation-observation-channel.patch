@@ -1,0 +1,674 @@
+From 38a7ada8cc2d73549b69e9739227e0f901299ef3 Mon Sep 17 00:00:00 2001
+From: Mario Maalini <magalinimario@gmail.com>
+Date: Thu, 15 Oct 2026 17:46:26 +0200
+Subject: [PATCH] Add opt-in reputation observation channel
+
+Each agent's reputation rep_i = R_i - mean_{j!=i} R_j, with
+R_i(t) = lambda * R_i(t-1) + r_i(t), is appended to the observation as one
+extra channel holding rep_j at agent j's cell in each agent's egocentric view.
+
+- Envs report info["individual_rewards"] (per-agent reward before any
+  common/shaped conversion) in every reward mode.
+- socialjax/wrappers/reputation.py: ReputationWrapper (R resets per episode).
+- socialjax.make(..., reputation=True, reputation_lambda=...) applies it.
+- REPUTATION / REPUTATION_LAMBDA in every *_base.yaml; train.py forwards them
+  to ENV_KWARGS so it works for all algorithms (default off).
+- tests/test_reputation.py: formula, reset, shapes, and view alignment
+  against each env's own obs for all 8 grid envs.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ algorithms/IPPO/config/ippo_base.yaml         |   4 +
+ algorithms/IRAT/config/irat_base.yaml         |   4 +
+ algorithms/MAPPO/config/mappo_base.yaml       |   4 +
+ algorithms/SVO/config/svo_base.yaml           |   4 +
+ algorithms/TRANSFER/config/transfer_base.yaml |   4 +
+ algorithms/VDN/config/vdn_base.yaml           |   4 +
+ algorithms/train.py                           |  13 ++
+ socialjax/environments/cleanup/clean_up.py    |   4 +-
+ socialjax/environments/coin_game/coin_game.py |   6 +-
+ .../common_harvest/harvest_open.py            |   4 +-
+ .../environments/coop_mining/coop_mining.py   |   3 +
+ socialjax/environments/gift/gift.py           |   4 +
+ .../environments/lb_foraging/lb_foraging.py   |   3 +
+ socialjax/environments/mushrooms/mushrooms.py |   5 +-
+ socialjax/environments/pd_arena/pd_arena.py   |  11 ++
+ .../environments/territory/territory_env.py   |   3 +
+ socialjax/registration.py                     |  14 +-
+ socialjax/wrappers/reputation.py              | 151 ++++++++++++++++++
+ tests/test_reputation.py                      | 113 +++++++++++++
+ 19 files changed, 351 insertions(+), 7 deletions(-)
+ create mode 100644 socialjax/wrappers/reputation.py
+ create mode 100644 tests/test_reputation.py
+
+diff --git a/algorithms/IPPO/config/ippo_base.yaml b/algorithms/IPPO/config/ippo_base.yaml
+index 779a770..87eace3 100644
+--- a/algorithms/IPPO/config/ippo_base.yaml
++++ b/algorithms/IPPO/config/ippo_base.yaml
+@@ -42,3 +42,7 @@
+ "ENTITY": ""
+ "PROJECT": "socialjax"
+ "WANDB_MODE": "online"
++
++# Reputation observation channel (socialjax/wrappers/reputation.py)
++"REPUTATION": False
++"REPUTATION_LAMBDA": 0.99
+diff --git a/algorithms/IRAT/config/irat_base.yaml b/algorithms/IRAT/config/irat_base.yaml
+index d6f2384..089eb1e 100644
+--- a/algorithms/IRAT/config/irat_base.yaml
++++ b/algorithms/IRAT/config/irat_base.yaml
+@@ -41,3 +41,7 @@
+ "ENTITY": ""
+ "PROJECT": "socialjax"
+ "WANDB_MODE": "online"
++
++# Reputation observation channel (socialjax/wrappers/reputation.py)
++"REPUTATION": False
++"REPUTATION_LAMBDA": 0.99
+diff --git a/algorithms/MAPPO/config/mappo_base.yaml b/algorithms/MAPPO/config/mappo_base.yaml
+index a51f5a5..e51ca20 100644
+--- a/algorithms/MAPPO/config/mappo_base.yaml
++++ b/algorithms/MAPPO/config/mappo_base.yaml
+@@ -41,3 +41,7 @@
+ "ENTITY": ""
+ "PROJECT": "socialjax"
+ "WANDB_MODE": "online"
++
++# Reputation observation channel (socialjax/wrappers/reputation.py)
++"REPUTATION": False
++"REPUTATION_LAMBDA": 0.99
+diff --git a/algorithms/SVO/config/svo_base.yaml b/algorithms/SVO/config/svo_base.yaml
+index f52dbcf..2751107 100644
+--- a/algorithms/SVO/config/svo_base.yaml
++++ b/algorithms/SVO/config/svo_base.yaml
+@@ -44,3 +44,7 @@
+ "ENTITY": ""
+ "PROJECT": "socialjax"
+ "WANDB_MODE": "online"
++
++# Reputation observation channel (socialjax/wrappers/reputation.py)
++"REPUTATION": False
++"REPUTATION_LAMBDA": 0.99
+diff --git a/algorithms/TRANSFER/config/transfer_base.yaml b/algorithms/TRANSFER/config/transfer_base.yaml
+index 5abde7d..b5654bc 100644
+--- a/algorithms/TRANSFER/config/transfer_base.yaml
++++ b/algorithms/TRANSFER/config/transfer_base.yaml
+@@ -38,3 +38,7 @@
+ "ENTITY": ""
+ "PROJECT": "transfer_fixed_socialjax"
+ "WANDB_MODE": "online"
++
++# Reputation observation channel (socialjax/wrappers/reputation.py)
++"REPUTATION": False
++"REPUTATION_LAMBDA": 0.99
+diff --git a/algorithms/VDN/config/vdn_base.yaml b/algorithms/VDN/config/vdn_base.yaml
+index 048481b..04b733a 100644
+--- a/algorithms/VDN/config/vdn_base.yaml
++++ b/algorithms/VDN/config/vdn_base.yaml
+@@ -60,3 +60,7 @@ alg:
+ 
+ # Where to save the params (if None, will not save)
+ "SAVE_PATH": "checkpoints/vdn"
++
++# Reputation observation channel (socialjax/wrappers/reputation.py)
++"REPUTATION": False
++"REPUTATION_LAMBDA": 0.99
+diff --git a/algorithms/train.py b/algorithms/train.py
+index a0373a9..ada7616 100644
+--- a/algorithms/train.py
++++ b/algorithms/train.py
+@@ -57,6 +57,18 @@ def _resolve(algo: str, env: str):
+     return env_module, runner_module, config_path, config_name
+ 
+ 
++def _apply_reputation(cfg):
++    """REPUTATION=True -> forward it to socialjax.make via ENV_KWARGS, so every
++    algorithm builds its env with the ReputationWrapper."""
++    from omegaconf import open_dict
++
++    if not cfg.get("REPUTATION", False):
++        return
++    with open_dict(cfg):
++        cfg.ENV_KWARGS.reputation = True
++        cfg.ENV_KWARGS.reputation_lambda = cfg.get("REPUTATION_LAMBDA", 0.99)
++
++
+ def _build_main(algo, env, env_mod, runner, config_path, config_name):
+     """Create a @hydra.main-decorated entry function bound to the chosen algo/env."""
+     import hydra
+@@ -67,6 +79,7 @@ def _build_main(algo, env, env_mod, runner, config_path, config_name):
+ 
+     @hydra.main(version_base=None, config_path=config_path, config_name=config_name)
+     def main(cfg):
++        _apply_reputation(cfg)
+         if cfg.get(tune_flag, False):
+             runner.tune(cfg, env_mod.make_train, **tune_kwargs)
+         else:
+diff --git a/socialjax/environments/cleanup/clean_up.py b/socialjax/environments/cleanup/clean_up.py
+index b915b60..86d37d2 100644
+--- a/socialjax/environments/cleanup/clean_up.py
++++ b/socialjax/environments/cleanup/clean_up.py
+@@ -1259,7 +1259,9 @@ class Clean_up(MultiAgentEnv):
+                     "original_rewards": rewards.squeeze(),
+                     "shaped_rewards": rewards.squeeze(),
+                 }
+-            
++
++            # Per-agent reward before any common/shaped conversion (used by ReputationWrapper).
++            info["individual_rewards"] = (jnp.where(apple_matches, 1, 0) * self.num_agents).squeeze().astype(jnp.float32)
+             info["clean_action_info"] = jnp.where(actions == Actions.zap_clean, 1, 0).squeeze()
+             info["cleaned_water"] = jnp.array([len(state.potential_dirt_and_dirt_label) - dirtCount] * self.num_agents).squeeze()
+             info["waste_cleared"] = jnp.array([len(state.potential_dirt_and_dirt_label) - dirtCount] * self.num_agents).squeeze() 
+diff --git a/socialjax/environments/coin_game/coin_game.py b/socialjax/environments/coin_game/coin_game.py
+index 241f730..a2fdce0 100644
+--- a/socialjax/environments/coin_game/coin_game.py
++++ b/socialjax/environments/coin_game/coin_game.py
+@@ -748,6 +748,9 @@ class CoinGame(MultiAgentEnv):
+             state = state.replace(agent_locs=new_locs)
+ 
+ 
++            # Per-agent reward before any common/shaped conversion (used by ReputationWrapper).
++            individual_rewards = jnp.array([red_reward[0], green_reward[0]], dtype=jnp.float32) * self.num_agents
++
+             if self.shared_rewards:
+                 rewards = jnp.zeros((2, 1))
+                 rewards = rewards.at[0, 0].set(red_reward[0])
+@@ -830,7 +833,8 @@ class CoinGame(MultiAgentEnv):
+                     "original_rewards": rewards.squeeze(),
+                     "shaped_rewards": sum_rewards,
+                 }
+-            
++
++            info["individual_rewards"] = individual_rewards
+             eat_own_coins = jnp.zeros((2, 1))
+             red_reward, green_reward = 0, 0
+             red_reward = jnp.where(
+diff --git a/socialjax/environments/common_harvest/harvest_open.py b/socialjax/environments/common_harvest/harvest_open.py
+index d43cb1b..e6384f2 100644
+--- a/socialjax/environments/common_harvest/harvest_open.py
++++ b/socialjax/environments/common_harvest/harvest_open.py
+@@ -1245,7 +1245,9 @@ class Harvest_open(MultiAgentEnv):
+                 rewards = jnp.zeros((self.num_agents, 1))
+                 rewards = jnp.where(apple_matches, 1, rewards) * self.num_agents
+                 info = {}
+-            
++
++            # Per-agent reward before any common/shaped conversion (used by ReputationWrapper).
++            info["individual_rewards"] = (jnp.where(apple_matches, 1, 0) * self.num_agents).squeeze().astype(jnp.float32)
+             AppleCount = jnp.sum(state.grid == Items.apple)
+             info["AppleCount_info"] = jnp.zeros((self.num_agents, 1)).squeeze() + AppleCount
+             
+diff --git a/socialjax/environments/coop_mining/coop_mining.py b/socialjax/environments/coop_mining/coop_mining.py
+index 4cacf91..e396600 100644
+--- a/socialjax/environments/coop_mining/coop_mining.py
++++ b/socialjax/environments/coop_mining/coop_mining.py
+@@ -676,6 +676,8 @@ class CoopMining(MultiAgentEnv):
+         new_grid = self.regrow_ore_vectorized(new_grid, rng_iron, rng_gold)
+ 
+         # Aggregate Rewards
++        # Per-agent reward before any common/shaped conversion (used by ReputationWrapper).
++        individual_rewards = ((rewards_iron + rewards_gold) * self.num_agents).astype(jnp.float32)
+         if self.shared_rewards:
+             total_rewards = jnp.sum(rewards_iron + rewards_gold)  # Scalar
+             final_rewards = jnp.full((self.num_agents,), total_rewards)
+@@ -740,6 +742,7 @@ class CoopMining(MultiAgentEnv):
+             final_rewards = (rewards_iron + rewards_gold) * self.num_agents # (N,)
+             info = {}
+ 
++        info["individual_rewards"] = individual_rewards
+         info["mining_gold"] = rewards_gold * self.num_agents
+ 
+         # if self.shared_rewards:
+diff --git a/socialjax/environments/gift/gift.py b/socialjax/environments/gift/gift.py
+index fd3a160..90af561 100644
+--- a/socialjax/environments/gift/gift.py
++++ b/socialjax/environments/gift/gift.py
+@@ -935,6 +935,9 @@ class Gift(MultiAgentEnv):
+             new_bag = comsume_bag.transpose()
+             state = state.replace(agents_bag=new_bag)
+ 
++            # Per-agent reward before any common/shaped conversion (used by ReputationWrapper).
++            individual_rewards = (rewards * self.num_agents).squeeze().astype(jnp.float32)
++
+             if self.shared_rewards:
+                 rewards_sum_all_agents = jnp.zeros((self.num_agents, 1))
+                 rewards = jnp.sum(rewards)
+@@ -999,6 +1002,7 @@ class Gift(MultiAgentEnv):
+                 rewards = rewards * self.num_agents
+                 info = {}
+ 
++            info["individual_rewards"] = individual_rewards
+             info["give_actions"] = jnp.where(actions == Actions.zap_forward, 1, 0).squeeze()
+             info["level_two_and_three_tokens"] = level_two_and_three_tokens.squeeze() * 10
+ 
+diff --git a/socialjax/environments/lb_foraging/lb_foraging.py b/socialjax/environments/lb_foraging/lb_foraging.py
+index 968f2a8..de5a65a 100644
+--- a/socialjax/environments/lb_foraging/lb_foraging.py
++++ b/socialjax/environments/lb_foraging/lb_foraging.py
+@@ -376,6 +376,8 @@ class LevelBasedForaging(MultiAgentEnv):
+         )
+ 
+         # 7. Apply reward shaping if configured
++        # Per-agent reward before any common/shaped conversion (used by ReputationWrapper).
++        individual_rewards = rewards.astype(jnp.float32)
+         if self.shared_rewards:
+             total_reward = jnp.sum(rewards)
+             final_rewards = jnp.full((self.num_agents,), total_reward)
+@@ -420,6 +422,7 @@ class LevelBasedForaging(MultiAgentEnv):
+             final_rewards = rewards
+             shaped_rewards = rewards
+             info = {}
++        info["individual_rewards"] = individual_rewards
+ 
+         # 8. Build next state
+         new_state = State(
+diff --git a/socialjax/environments/mushrooms/mushrooms.py b/socialjax/environments/mushrooms/mushrooms.py
+index e13a9dd..0fb60d1 100644
+--- a/socialjax/environments/mushrooms/mushrooms.py
++++ b/socialjax/environments/mushrooms/mushrooms.py
+@@ -1095,6 +1095,8 @@ class Mushrooms(MultiAgentEnv):
+             state = state.replace(reborn_locs=new_re_locs)
+ 
+             rewards = rewards * self.num_agents
++            # Per-agent reward before any common/shaped conversion (used by ReputationWrapper).
++            individual_rewards = rewards.squeeze().astype(jnp.float32)
+ 
+             if self.shared_rewards:
+                 rewards_sum_all_agents = jnp.zeros((self.num_agents, 1))
+@@ -1154,7 +1156,8 @@ class Mushrooms(MultiAgentEnv):
+             else:
+                 rewards = rewards
+                 info = {}
+-            
++
++            info["individual_rewards"] = individual_rewards
+             blue_reward  = jnp.where(blue_matches, 1, 0)
+             info["eat_blue_mushrooms"] = blue_reward.squeeze()
+ 
+diff --git a/socialjax/environments/pd_arena/pd_arena.py b/socialjax/environments/pd_arena/pd_arena.py
+index 088f7e9..bf0e1cf 100644
+--- a/socialjax/environments/pd_arena/pd_arena.py
++++ b/socialjax/environments/pd_arena/pd_arena.py
+@@ -1927,6 +1927,7 @@ class PD_Arena(MultiAgentEnv):
+                 rewards, state, reborn_players = _interact_pd(key, state, actions)
+                 rewards_output = jnp.array([0]* self.num_agents)
+                 rewards = rewards.squeeze()
++                individual_rewards = rewards * self.num_agents
+                 # Scale per-agent mean by num_agents (== sum-over-agents) to match
+                 # cleanup/coop_mining and to give MAPPO/PPO enough gradient signal.
+                 common_reward = rewards.mean() * self.num_agents
+@@ -1940,6 +1941,7 @@ class PD_Arena(MultiAgentEnv):
+                 rewards, state, reborn_players = _interact_pd(key, state, actions)
+                 # Scale per-agent reward by num_agents to match other envs' convention.
+                 original_rewards = rewards * self.num_agents
++                individual_rewards = original_rewards.squeeze()
+                 rewards, theta = self.get_svo_rewards(original_rewards, self.svo_w, self.svo_ideal_angle_degrees, self.svo_target_agents)
+                 info = {
+                     "original_rewards": original_rewards.squeeze(),
+@@ -1955,6 +1957,7 @@ class PD_Arena(MultiAgentEnv):
+                 # Calculate current s_interest based on timestep
+                 current_s_interest = get_current_s_interest(timestep)
+                 original_flat = original_rewards.squeeze()
++                individual_rewards = original_flat
+ 
+                 # Each agent gets s * their_reward + (1-s)/(n-1) * sum_of_others
+                 total_reward = jnp.sum(original_flat)
+@@ -1973,6 +1976,7 @@ class PD_Arena(MultiAgentEnv):
+                 rewards, state, reborn_players = _interact_pd(key, state, actions)
+                 # Scale per-agent reward by num_agents to match other envs' convention.
+                 rewards = rewards * self.num_agents
++                individual_rewards = rewards.squeeze()
+                 # rewards_output = jnp.array([0]* self.num_agents)
+                 # rewards = rewards.squeeze()
+                 # common_reward = rewards.mean()
+@@ -1988,6 +1992,8 @@ class PD_Arena(MultiAgentEnv):
+                 # }
+                 info = {}
+             
++            # Per-agent reward before any common/shaped conversion (used by ReputationWrapper).
++            info["individual_rewards"] = individual_rewards
+             info['eat_coop_tokens_number'] = jnp.array([jnp.sum(condition_coop)] * self.num_agents).squeeze() * self.num_inner_steps
+                 
+             # rewards, state, reborn_players = _interact_pd(key, state, actions)
+@@ -2051,6 +2057,11 @@ class PD_Arena(MultiAgentEnv):
+                 jnp.zeros_like(rewards, dtype=jnp.int16),
+                 rewards
+             )
++            info["individual_rewards"] = jnp.where(
++                reset_inner,
++                jnp.zeros_like(info["individual_rewards"]),
++                info["individual_rewards"]
++            )
+ 
+             mean_inv = state.agent_invs.mean(axis=0)
+             return (
+diff --git a/socialjax/environments/territory/territory_env.py b/socialjax/environments/territory/territory_env.py
+index 44948d4..b12d4a0 100644
+--- a/socialjax/environments/territory/territory_env.py
++++ b/socialjax/environments/territory/territory_env.py
+@@ -1867,6 +1867,8 @@ class Territory_open(MultiAgentEnv):
+             # rewards_matrix = jnp.logical_and(jnp.equal(state.grid[None, ...], color[:, None, None]),claimed_indicator_time_matrix[None, ...] >= 25)
+             # rewards = jnp.sum(jnp.equal(state.grid[None, ...], color[:, None, None]), axis=(1, 2)) * 0.01
+             # rewards = jnp.sum(rewards_matrix, axis=(1, 2)) * 0.01
++            # Per-agent reward before any common/shaped conversion (used by ReputationWrapper).
++            individual_rewards = (jnp.sum(rewards_matrix, axis=(1, 2)) * 0.01).astype(jnp.float32)
+             if self.shared_rewards:
+                 original_rewards = jnp.sum(rewards_matrix, axis=(1, 2)) * 0.01
+ 
+@@ -1926,6 +1928,7 @@ class Territory_open(MultiAgentEnv):
+             else:
+                 rewards = jnp.sum(rewards_matrix, axis=(1, 2)) * 0.01
+                 info = {}
++            info["individual_rewards"] = individual_rewards
+             
+ 
+             # reward_sum = jnp.sum(rewards)
+diff --git a/socialjax/registration.py b/socialjax/registration.py
+index cd2bda8..57ca5e6 100644
+--- a/socialjax/registration.py
++++ b/socialjax/registration.py
+@@ -27,8 +27,12 @@ REGISTERED_ENVS = [
+ ]
+ 
+ 
+-def make(env_id: str, **env_kwargs):
+-    """A JAX-version of OpenAI's env.make(env_name), built off Gymnax"""
++def make(env_id: str, reputation: bool = False, reputation_lambda: float = 0.99, **env_kwargs):
++    """A JAX-version of OpenAI's env.make(env_name), built off Gymnax.
++
++    reputation=True wraps the env in ReputationWrapper, which appends each
++    agent's reputation as an extra observation channel.
++    """
+     if env_id not in REGISTERED_ENVS:
+         raise ValueError(f"{env_id} is not in registered SocialJax environments")
+ 
+@@ -52,4 +56,8 @@ def make(env_id: str, **env_kwargs):
+         env = Gift(**env_kwargs)
+     elif env_id == "lb_foraging":
+         env = LBForaging(**env_kwargs)
+-    return env
+\ No newline at end of file
++
++    if reputation:
++        from socialjax.wrappers.reputation import ReputationWrapper
++        env = ReputationWrapper(env, reputation_lambda=reputation_lambda)
++    return env
+diff --git a/socialjax/wrappers/reputation.py b/socialjax/wrappers/reputation.py
+new file mode 100644
+index 0000000..544ecb2
+--- /dev/null
++++ b/socialjax/wrappers/reputation.py
+@@ -0,0 +1,151 @@
++"""Reputation observation channel.
++
++For every agent i a discounted individual return is tracked
++
++    R_i(t) = lambda * R_i(t-1) + r_i(t)
++
++and its reputation is the gap to the mean of the other agents
++
++    rep_i(t) = R_i(t) - mean_{j != i} R_j(t).
++
++r_i(t) is ``info["individual_rewards"]``: the per-agent reward each env
++reports *before* converting it into a common / shaped reward. R is reset to
++zero when the episode ends (``done["__all__"]``).
++
++The reputation is appended to each agent's observation as one extra channel:
++the cell where agent j stands holds rep_j, every other cell is 0. The map is
++sliced and rotated exactly like the env's own egocentric view, so the value
++lands on the same cell as the agent it belongs to.
++
++Enable with ``socialjax.make(env_id, reputation=True, reputation_lambda=...)``
++or, from the training CLI, ``REPUTATION=True REPUTATION_LAMBDA=0.99``.
++"""
++from functools import partial
++from typing import Tuple
++
++import chex
++import jax
++import jax.numpy as jnp
++from flax import struct
++
++from socialjax.environments import spaces
++from socialjax.wrappers.baselines import JaxMARLWrapper
++
++
++@struct.dataclass
++class ReputationState:
++    env_state: chex.ArrayTree
++    discounted_returns: chex.Array  # R_i(t), shape (num_agents,)
++
++
++def compute_reputation(discounted_returns: chex.Array) -> chex.Array:
++    """rep_i = R_i - mean_{j != i} R_j."""
++    n = discounted_returns.shape[0]
++    others_mean = (jnp.sum(discounted_returns) - discounted_returns) / (n - 1)
++    return discounted_returns - others_mean
++
++
++class ReputationWrapper(JaxMARLWrapper):
++    """Tracks reputation and appends it to the observation as a last channel."""
++
++    # Envs whose egocentric window is centred on the agent rather than
++    # pushed forward in its facing direction.
++    _CENTRED_VIEW_ENVS = ("CoopMining",)
++
++    def __init__(self, env, reputation_lambda: float = 0.99):
++        super().__init__(env)
++        if not getattr(env, "cnn", True):
++            raise NotImplementedError("ReputationWrapper requires cnn=True observations.")
++        for attr in ("OBS_SIZE", "PADDING", "GRID_SIZE_ROW", "GRID_SIZE_COL"):
++            if not hasattr(env, attr):
++                raise NotImplementedError(
++                    f"ReputationWrapper does not support {type(env).__name__} "
++                    f"(missing egocentric grid attribute '{attr}')."
++                )
++        if env.num_agents < 2:
++            raise ValueError("Reputation needs at least two agents.")
++        self.reputation_lambda = reputation_lambda
++        self._centred_view = type(env).__name__ in self._CENTRED_VIEW_ENVS
++
++    def observation_space(self):
++        _, inner_shape = self._env.observation_space()
++        shape = (*inner_shape[:-1], inner_shape[-1] + 1)
++        return spaces.Box(low=-1e9, high=1e9, shape=shape, dtype=jnp.float32), shape
++
++    def render(self, state: ReputationState, *args, **kwargs):
++        return self._env.render(state.env_state, *args, **kwargs)
++
++    @partial(jax.jit, static_argnums=(0,))
++    def reset(self, key: chex.PRNGKey) -> Tuple[chex.Array, ReputationState]:
++        obs, env_state = self._env.reset(key)
++        discounted_returns = jnp.zeros((self._env.num_agents,), dtype=jnp.float32)
++        obs = self._add_channel(obs, env_state, compute_reputation(discounted_returns))
++        return obs, ReputationState(env_state, discounted_returns)
++
++    @partial(jax.jit, static_argnums=(0,))
++    def step(self, key: chex.PRNGKey, state: ReputationState, action, *args, **kwargs):
++        obs, env_state, reward, done, info = self._env.step(
++            key, state.env_state, action, *args, **kwargs
++        )
++        individual_rewards = jnp.reshape(info["individual_rewards"], (self._env.num_agents,))
++        discounted_returns = self.reputation_lambda * state.discounted_returns + individual_rewards
++        # Reputation is reported for the step that just happened, then R resets
++        # with the env so the next episode starts from zero.
++        reputation = compute_reputation(discounted_returns)
++        info["reputation"] = reputation
++        discounted_returns = jnp.where(done["__all__"], 0.0, discounted_returns)
++        # After an auto-reset the obs belongs to the new episode, where everyone is at 0.
++        obs_reputation = jnp.where(done["__all__"], 0.0, reputation)
++        obs = self._add_channel(obs, env_state, obs_reputation)
++        return obs, ReputationState(env_state, discounted_returns), reward, done, info
++
++    def _add_channel(self, obs: chex.Array, env_state, reputation: chex.Array) -> chex.Array:
++        channel = self.reputation_views(env_state.agent_locs, reputation)
++        return jnp.concatenate(
++            [obs.astype(jnp.float32), channel[..., None]], axis=-1
++        )
++
++    def reputation_views(self, agent_locs: chex.Array, values: chex.Array) -> chex.Array:
++        """Egocentric (num_agents, OBS_SIZE, OBS_SIZE) views of a map holding
++        values[j] at agent j's cell, using the env's slicing + rotation."""
++        env = self._env
++        rows = agent_locs[:, 0].astype(jnp.int32)
++        cols = agent_locs[:, 1].astype(jnp.int32)
++        value_map = jnp.zeros((env.GRID_SIZE_ROW, env.GRID_SIZE_COL), dtype=jnp.float32)
++        value_map = value_map.at[rows, cols].set(values.astype(jnp.float32))
++        return self.egocentric_views(value_map, agent_locs)
++
++    def egocentric_views(self, full_map: chex.Array, agent_locs: chex.Array, pad_value=0) -> chex.Array:
++        """Each agent's (OBS_SIZE, OBS_SIZE) window of a (GRID_SIZE_ROW, GRID_SIZE_COL) map."""
++        env = self._env
++        padded = jnp.pad(
++            full_map,
++            ((env.PADDING, env.PADDING), (env.PADDING, env.PADDING)),
++            constant_values=pad_value,
++        )
++
++        def view(agent_loc):
++            x, y = self._obs_point(agent_loc)
++            window = jax.lax.dynamic_slice(padded, (x, y), (env.OBS_SIZE, env.OBS_SIZE))
++            direction = agent_loc[2]
++            window = jnp.where(direction == 1, jnp.rot90(window, k=1, axes=(0, 1)), window)
++            window = jnp.where(direction == 2, jnp.rot90(window, k=2, axes=(0, 1)), window)
++            window = jnp.where(direction == 3, jnp.rot90(window, k=3, axes=(0, 1)), window)
++            return window
++
++        return jax.vmap(view)(agent_locs.astype(jnp.int32))
++
++    def _obs_point(self, agent_loc: chex.Array):
++        """Top-left corner of the agent's window in the padded map. Mirrors
++        ``_get_obs_point`` in the grid envs (and ``get_obs_point`` in coop_mining)."""
++        size, pad = self._env.OBS_SIZE, self._env.PADDING
++        x, y, direction = agent_loc[0], agent_loc[1], agent_loc[2]
++        x = x + pad - size // 2
++        y = y + pad - size // 2
++        if self._centred_view:
++            return x, y
++        x = jnp.where(direction == 0, x + size // 2 - 1, x)
++        y = jnp.where(direction == 1, y + size // 2 - 1, y)
++        x = jnp.where(direction == 2, x - size // 2 + 1, x)
++        y = jnp.where(direction == 3, y - size // 2 + 1, y)
++        return x, y
+diff --git a/tests/test_reputation.py b/tests/test_reputation.py
+new file mode 100644
+index 0000000..57bb551
+--- /dev/null
++++ b/tests/test_reputation.py
+@@ -0,0 +1,113 @@
++"""Standalone checks for socialjax.wrappers.reputation (no pytest).
++
++Run:
++  export PYTHONPATH=$PWD:$PYTHONPATH
++  JAX_PLATFORMS=cpu python tests/test_reputation.py
++"""
++
++import jax
++import jax.numpy as jnp
++import numpy as onp
++
++import socialjax
++from socialjax.wrappers.reputation import ReputationWrapper, compute_reputation
++
++ENVS = [
++    "coin_game",
++    "harvest_common_open",
++    "clean_up",
++    "coop_mining",
++    "territory_open",
++    "pd_arena",
++    "mushrooms",
++    "gift",
++]
++NUM_STEPS = 30
++# pd_arena's declared observation_space() assumes the 4 agents used by the training configs.
++ENV_KWARGS = {"pd_arena": {"num_agents": 4}}
++
++
++def run(name, fn):
++    fn()
++    print(f"ok: {name}")
++
++
++def random_actions(key, env):
++    return jax.random.randint(key, (env.num_agents,), 0, env.action_space().n)
++
++
++def test_formula():
++    R = jnp.array([4.0, 1.0, 1.0])
++    onp.testing.assert_allclose(compute_reputation(R), [3.0, -1.5, -1.5])
++    onp.testing.assert_allclose(compute_reputation(jnp.ones(5)), jnp.zeros(5))
++
++
++def rollout(env_id, shared_rewards, lam=0.9):
++    env = socialjax.make(env_id, reputation=True, reputation_lambda=lam,
++                         shared_rewards=shared_rewards, cnn=True, **ENV_KWARGS.get(env_id, {}))
++    key = jax.random.PRNGKey(0)
++    obs, state = env.reset(key)
++    steps = [(obs, state, None, None)]
++    for _ in range(NUM_STEPS):
++        key, k_act, k_step = jax.random.split(key, 3)
++        obs, state, reward, done, info = env.step(k_step, state, random_actions(k_act, env))
++        steps.append((obs, state, reward, info))
++    return env, steps
++
++
++def check_env(env_id):
++    for shared in (False, True):
++        lam = 0.9
++        env, steps = rollout(env_id, shared, lam)
++        inner_shape = env._env.observation_space()[1]
++
++        R = onp.zeros(env.num_agents)
++        for t, (obs, state, reward, info) in enumerate(steps):
++            # Shape: one extra channel, and observation_space() agrees.
++            assert obs.shape[-1] == inner_shape[-1] + 1, (env_id, obs.shape, inner_shape)
++            assert obs.shape[1:] == env.observation_space()[1], (env_id, obs.shape)
++
++            if info is not None:
++                r = onp.asarray(info["individual_rewards"]).reshape(-1)
++                assert r.shape == (env.num_agents,), (env_id, r.shape)
++                R = lam * R + r
++                onp.testing.assert_allclose(info["reputation"], compute_reputation(jnp.asarray(R)), rtol=1e-5, atol=1e-5)
++                onp.testing.assert_allclose(state.discounted_returns, R, rtol=1e-5, atol=1e-5)
++
++            # Placement: the reputation channel must equal the env's own view of
++            # a map that holds rep_j at agent j's cell.
++            rep = compute_reputation(state.discounted_returns)
++            expected = env.reputation_views(state.env_state.agent_locs, rep)
++            onp.testing.assert_allclose(obs[..., -1], expected, rtol=1e-5, atol=1e-5)
++
++        # Slicing/rotation agree with the env: run the env's own grid (non-empty
++        # cells, walls as padding) through the wrapper's view function and
++        # compare with the cells where the env's obs has any channel set. This
++        # checks offset and rotation for every agent and orientation.
++        rotations = set()
++        for obs, state, _, _ in steps:
++            es = state.env_state
++            # Ids above the last agent id (e.g. territory's ~1000 markers) fall
++            # outside the env's one-hot and never show up in the obs.
++            occupied = (es.grid != 0) & (es.grid <= int(jnp.max(env._agents)))
++            if hasattr(es, "occupant_grid"):  # coop_mining keeps agents in a separate grid
++                occupied = occupied | (es.occupant_grid > 0)
++            expected = onp.asarray(env.egocentric_views(occupied, es.agent_locs, pad_value=True))
++            actual = onp.asarray(obs[..., :-1]).any(axis=-1)
++            assert onp.array_equal(expected, actual), \
++                f"{env_id}: wrapper view does not line up with the env's obs"
++            rotations.update(onp.asarray(es.agent_locs[:, 2]).tolist())
++        print(f"   {env_id} (shared_rewards={shared}): obs {tuple(obs.shape)}, "
++              f"orientations seen {sorted(rotations)}")
++
++
++def test_default_unwrapped():
++    env = socialjax.make("pd_arena", cnn=True)
++    assert not isinstance(env, ReputationWrapper)
++
++
++if __name__ == "__main__":
++    run("formula", test_formula)
++    run("default is unwrapped", test_default_unwrapped)
++    for env_id in ENVS:
++        run(f"env {env_id}", lambda: check_env(env_id))
+-- 
+2.34.1
+
