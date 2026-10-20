@@ -80,8 +80,8 @@ def make_train(config):
             )
 
             # Flatten rewards and terminations to (num_envs * num_agents,)
-            reward_flat = reward.reshape(-1)
-            done_flat = done.reshape(-1)
+            reward_flat = reward.reshape(-1)    # type: ignore
+            done_flat = done.reshape(-1)        # type: ignore
 
             transition = Transition(
                 done=done_flat,
@@ -108,7 +108,7 @@ def make_train(config):
 
             # COMPUTE GAE (Reverse Scan)
             agent_state, env_state, last_obs, rep, rng = runner_state
-            last_obs_batch = last_obs.reshape((num_envs * num_agents, *last_obs.shape[2:]))
+            last_obs_batch = last_obs.reshape((num_envs * num_agents, *last_obs.shape[2:])) #type: ignore
             _, last_val = network.apply(agent_state.params, last_obs_batch)
 
             # Generalized Advantage Estimation (GAE)
