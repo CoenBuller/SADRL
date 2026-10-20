@@ -17,7 +17,7 @@ class Config:
 
     # Algorithm
     ALGO: str = "IPPO"
-    REWARD: str = "common"
+    REWARD: bool = True
     ACTIVATION: str = "relu"
 
     # Optimization loop
