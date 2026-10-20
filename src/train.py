@@ -19,9 +19,6 @@ class Transition(NamedTuple):
     info: dict
 
 
-# ------------------------- Reputation helpers ------------------------- #
-
-
 # ------------------------- Training Loop ------------------------- #
 def make_train(config):
     # Initialize environment and rng key
@@ -49,11 +46,27 @@ def make_train(config):
         else:
             init_x = jnp.zeros((num_envs * num_agents, *obs_shape[:2], obs_shape[2]))
         network_params = network.init(_rng, init_x)
-        
-        tx = optax.chain(
-            optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
-            optax.adam(config["LR"], eps=1e-5),
-        )
+
+        if config["ANNEAL_LR"]:
+            num_updates = config["TOTAL_TIMESTEPS"] // (config["NUM_STEPS"] * num_envs)
+            total_gradient_steps = num_updates * config["UPDATE_EPOCHS"] * config["NUM_MINIBATCHES"]
+            
+            lr_schedule = optax.linear_schedule(
+                init_value=config["LR"],
+                end_value=0.0,
+                transition_steps=total_gradient_steps
+            )
+            
+            tx = optax.chain(
+                optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+                optax.adam(learning_rate=lr_schedule, eps=1e-5),
+            )
+        else:
+            tx = optax.chain(
+                optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+                optax.adam(config["LR"], eps=1e-5),
+            )
+            
         agent_state = TrainState.create(apply_fn=network.apply, params=network_params, tx=tx)
 
         # 2. Vectorized Reset (Restart the environment)
