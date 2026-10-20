@@ -1,6 +1,8 @@
 import jax
 import wandb
 import dataclasses
+import numpy as np
+import pandas as pd
 
 # Adjust imports based on your project structure
 from src.config import Config
@@ -33,6 +35,21 @@ def main():
     output = jit_train_fn(rng)
     
     print("Training complete!")
+
+    print("Saving metrics locally...")
+    
+    # Pull metrics from device memory to CPU and convert to NumPy arrays
+    metrics_np = jax.tree_util.tree_map(lambda x: np.array(x), output["metrics"])
+    
+    # 2. Option A: Save as a Pandas DataFrame / CSV (Recommended for easy plotting in notebooks)
+    # Since each metric is an array of shape (num_updates,), they align cleanly as columns.
+    df = pd.DataFrame(metrics_np)
+    df.to_csv("training_metrics.csv", index=False)
+    print("Metrics saved to training_metrics.csv")
+
+    # 3. Option B: Save as a compressed NumPy file (Preserves exact JAX datatypes/shapes)
+    np.savez_compressed("training_metrics.npz", **metrics_np)
+    print("Metrics saved to training_metrics.npz")
     
     if config_dict["WANDB"]:
         wandb.finish()
