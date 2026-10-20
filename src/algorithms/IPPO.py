@@ -1,12 +1,7 @@
-import jax
 import jax.numpy as jnp
 import flax.linen as nn
-import optax
 
-from socialjax import make
-from typing import NamedTuple
 from flax.linen.initializers import orthogonal, constant
-from flax.training.train_state import TrainState
 
 
 class ActorCritic(nn.Module):

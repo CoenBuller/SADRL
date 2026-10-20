@@ -1,15 +1,12 @@
 import jax
 import jax.numpy as jnp
-import flax.linen as nn
 import optax
 
-from socialjax import make
 from typing import NamedTuple
-from flax.linen.initializers import orthogonal, constant
 from flax.training.train_state import TrainState
 
-from algorithms.IPPO import ActorCritic
-from environments.wrappers import Environment
+from src.algorithms.IPPO import ActorCritic
+from src.environments.wrappers import Environment
 
 class Transition(NamedTuple):
     done: jnp.ndarray
@@ -21,84 +18,138 @@ class Transition(NamedTuple):
     obs: jnp.ndarray
     info: dict
 
+
+# --- Reputation helpers ---
+def make_reputation_channel(n_agents, view_hw, own_pos):
+    """own_pos = (row, col) of the observing agent inside its own view window."""
+    H, W = view_hw
+    own = jnp.array(own_pos)
+
+    def one_env(agent_locs, rep):  # (A, 3), (A,)
+        def one_observer(i):
+            rel = agent_locs[:, :2] - agent_locs[i, :2]                             # Relative position between agent i and other agents
+            dr, dc = rel[:, 0], rel[:, 1]          
+            d = agent_locs[i, 2]                                                    # Direction agent i is pointed at 
+
+            # rotate into the observer's frame (90 degree angles only)
+            er = jnp.select([d == 0, d == 1, d == 2, d == 3], [dr, dc, -dr, -dc])
+            ec = jnp.select([d == 0, d == 1, d == 2, d == 3], [dc, -dr, -dc, dr])
+            r, c = er + own[0], ec + own[1]
+
+            inb = (r >= 0) & (r < H) & (c >= 0) & (c < W)                           # Checks wether other agents are within FoV of agent i
+            r, c = jnp.clip(r, 0, H - 1), jnp.clip(c, 0, W - 1)
+            return jnp.zeros((H, W)).at[r, c].add(jnp.where(inb, rep, 0.0))         # Mask the agents not in FoV
+        
+        return jax.vmap(one_observer)(jnp.arange(n_agents))                         # (A, H, W)
+
+    batched = jax.vmap(one_env)
+
+    def add_reputation(obs, state, rep):                                            # Obs (E,A,H,W,C), rep (E,A)
+        chan = batched(state.agent_locs, rep)                                       # Create a reputation channel across (E,A) using vectorized one_env()
+        return jnp.concatenate([obs, chan[..., None].astype(obs.dtype)], axis=-1)   # Add the channel to the observation 
+
+    return add_reputation
+
+
+def update_reputation(rep, reward, decay):
+    r = reward - reward.mean(axis=1, keepdims=True)                                 # (E,A) - (E,A) -> (E,A)
+    return rep*decay + r*(1 - decay)                                                # rep(t) = rep(t-1)*gamma + dr(t)*(1-gamma)
+
+# ------------------------- Training Loop ------------------------- #
 def make_train(config):
+    # Initialize environment and rng key
     env = Environment(env_name=config["ENV_NAME"], n_agents=config["N_AGENTS"], n_envs=config["N_ENVS"], seed=config["SEED"])
     num_agents = env.n_agents
     num_envs = env.n_envs
     action_dim = env.env.action_space(0).n
     rng = jax.random.PRNGKey(config["SEED"])
 
+    obs_shape = env.env.observation_space()[0].shape  #type:ignore : (H, W, C)
+    add_reputation = make_reputation_channel(num_agents, obs_shape[:2], config["OWN_POS"])
+
     def train(rng=rng):
-        # --- 1. Init Network & Optimizer ---
+        # 1. Init Network & Optimizer
         network = ActorCritic(action_dim=action_dim)
         rng, _rng = jax.random.split(rng)
-        init_x = jnp.zeros((num_envs * num_agents, *env.env.observation_space(0).shape))
+        init_x = jnp.zeros((num_envs * num_agents, *obs_shape[:2], obs_shape[2] + 1))
         network_params = network.init(_rng, init_x)
         
         tx = optax.chain(
             optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
             optax.adam(config["LR"], eps=1e-5),
         )
-        train_state = TrainState.create(apply_fn=network.apply, params=network_params, tx=tx)
+        agent_state = TrainState.create(apply_fn=network.apply, params=network_params, tx=tx)
 
-        # --- 2. Vectorized Reset ---
+        # 2. Vectorized Reset (Restart the environment)
         obs, env_state, rng = env.initialize(rng)
+        rep = jnp.zeros((num_envs, num_agents))                                         # At the start reputation is 0 for all agents
+        obs = add_reputation(obs, env_state, rep)                                       # Add the reputation channel to the observations
 
-        # --- 3. Inner Rollout Step ---
+        # 3. Inner Rollout Step 
         def _env_step(runner_state, unused):
-            train_state, env_state, last_obs, rng = runner_state
+            agent_state, env_state, last_obs, rep, rng = runner_state
             rng, _rng_action, _rng_step = jax.random.split(rng, 3)
 
             # Flatten across environments and agents for forward pass
             obs_batch = last_obs.reshape((num_envs * num_agents, *last_obs.shape[2:]))
-            logits, value = network.apply(train_state.params, obs_batch)
+            logits, value = network.apply(agent_state.params, obs_batch)                # Forward pass with agents          
             
-            action = jax.random.categorical(_rng_action, logits)
-            log_prob = jax.nn.log_softmax(logits)[jnp.arange(action.shape[0]), action]
+            action = jax.random.categorical(_rng_action, logits)                        # Pick action
+            log_prob = jax.nn.log_softmax(logits)[jnp.arange(action.shape[0]), action]  # Convert to log probabilities, used for GAE and loss
 
-            # Format actions for SocialJax: list of length `num_agents`
+            # Actions as (num_envs, num_agents) array
             actions_per_env = action.reshape((num_envs, num_agents))
-            env_actions = [actions_per_env[:, i] for i in range(num_agents)]
 
-            # Step parallel environments
-            step_rngs = jax.random.split(_rng_step, num_envs)
-            next_obs, next_env_state, reward, done, _, info = jax.vmap(env.step)(
-                step_rngs, env_state, env_actions
+            # Step parallel environments (wrapper step is already batched)
+            next_obs, next_env_state, reward, done, info = env.step(
+                _rng_step, actions_per_env, env_state
             )
 
-            # Reshape rewards and terminations back to (num_envs * num_agents,)
-            reward_flat = jnp.array(reward).T.reshape(-1)
-            done_flat = jnp.repeat(jnp.array(done), num_agents)
+            # Reputation update + extra obs channel
+            next_rep = update_reputation(rep, reward, config["REP_DECAY"])              # Own reputation function
+            next_rep = jnp.where(done, 0.0, next_rep)                                   # reset on episode end
+            next_obs = add_reputation(next_obs, next_env_state, next_rep)               # Add the reputation to the observation space
+
+            # Flatten rewards and terminations to (num_envs * num_agents,)
+            reward_flat = reward.reshape(-1)
+            done_flat = done.reshape(-1)
 
             transition = Transition(
                 done=done_flat,
                 action=action,
-                value=value,
+                value=value,                                                            # type: ignore , Static typing artifact in flax about the return type of value
                 reward=reward_flat,
-                reputation=...,
+                reputation=rep.reshape(-1),
                 log_prob=log_prob,
                 obs=obs_batch,
                 info=info,
             )
-            runner_state = (train_state, next_env_state, next_obs, rng)
+            runner_state = (agent_state, next_env_state, next_obs, next_rep, rng)
             return runner_state, transition
 
-        # --- 4. Outer Update Step (Rollout + GAE + Update) ---
+        # 4. Outer Update Step (Rollout + GAE + Update) 
         def _update_step(runner_state, unused):
-            # COLLECT ROLLOUT
-            runner_state, traj_batch = jax.lax.scan(_env_step, runner_state, None, config["NUM_STEPS"])
+            # collect rollout
+            runner_state, traj_batch = jax.lax.scan( # Apllies the batched _env_step over the runner state for "NUM_STEPS"
+                _env_step,          
+                runner_state, 
+                None, 
+                config["NUM_STEPS"]
+                )
 
             # COMPUTE GAE (Reverse Scan)
-            train_state, env_state, last_obs, rng = runner_state
+            agent_state, env_state, last_obs, rep, rng = runner_state
             last_obs_batch = last_obs.reshape((num_envs * num_agents, *last_obs.shape[2:]))
-            _, last_val = network.apply(train_state.params, last_obs_batch)
+            _, last_val = network.apply(agent_state.params, last_obs_batch)
 
+            # Generalized Advantage Estimation (GAE)
             def _calculate_gae(traj_batch, last_val):
+                
                 def _get_advantages(gae_and_next_value, transition):
                     gae, next_value = gae_and_next_value
                     done, value, reward = transition.done, transition.value, transition.reward
-                    delta = reward + config["GAMMA"] * next_value * (1.0 - done) - value
-                    gae = delta + config["GAMMA"] * config["GAE_LAMBDA"] * (1.0 - done) * gae
+                    delta = reward + config["GAMMA"] * next_value * (1.0 - done) - value        # delta = r + γ·V' · (1-done) - V
+                    gae = delta + config["GAMMA"] * config["GAE_LAMBDA"] * (1.0 - done) * gae   # gae = delta + γλ·(1-done)·gae
                     return (gae, value), gae
 
                 _, advantages = jax.lax.scan(
@@ -112,9 +163,9 @@ def make_train(config):
 
             advantages, targets = _calculate_gae(traj_batch, last_val)
 
-            # UPDATE EPOCHS (Mini-batch SGD)
+            # Update Epoch (Mini-batch SGD)
             def _update_epoch(update_state, unused):
-                def _update_minbatch(train_state, batch_info):
+                def _update_minbatch(agent_state, batch_info):
                     traj_batch, advantages, targets = batch_info
 
                     def _loss_fn(params, traj_batch, gae, targets):
@@ -122,11 +173,11 @@ def make_train(config):
                         log_prob = jax.nn.log_softmax(logits)[jnp.arange(traj_batch.action.shape[0]), traj_batch.action]
 
                         # Clipped policy objective
-                        ratio = jnp.exp(log_prob - traj_batch.log_prob)
-                        gae = (gae - gae.mean()) / (gae.std() + 1e-8)
+                        ratio = jnp.exp(log_prob - traj_batch.log_prob)             # Relative P of taking a_t in s_t under new policy compare to old policy
+                        gae = (gae - gae.mean()) / (gae.std() + 1e-8)               # Normalized GAE
                         loss_actor1 = ratio * gae
                         loss_actor2 = jnp.clip(ratio, 1.0 - config["CLIP_EPS"], 1.0 + config["CLIP_EPS"]) * gae
-                        loss_actor = -jnp.minimum(loss_actor1, loss_actor2).mean()
+                        loss_actor = -jnp.minimum(loss_actor1, loss_actor2).mean()  # Take minimum of normal and clipped ratio*gae
 
                         # Value objective
                         value_pred_clipped = traj_batch.value + (value - traj_batch.value).clip(
@@ -144,11 +195,11 @@ def make_train(config):
                         return total_loss, (loss_actor, loss_critic, entropy)
 
                     grad_fn = jax.value_and_grad(_loss_fn, has_aux=True)
-                    total_loss, grads = grad_fn(train_state.params, traj_batch, advantages, targets)
-                    train_state = train_state.apply_gradients(grads=grads)
-                    return train_state, total_loss
+                    (total_loss, aux), grads = grad_fn(agent_state.params, traj_batch, advantages, targets) # grads are the gradients over the params of the network
+                    agent_state = agent_state.apply_gradients(grads=grads)  # update the network with gradient descent using the grads
+                    return agent_state, (total_loss, aux)
 
-                train_state, traj_batch, advantages, targets, rng = update_state
+                agent_state, traj_batch, advantages, targets, rng = update_state
                 rng, _rng = jax.random.split(rng)
                 
                 # Flatten batch over steps, environments, and agents
@@ -164,20 +215,20 @@ def make_train(config):
                     lambda x: jnp.reshape(x, [config["NUM_MINIBATCHES"], -1] + list(x.shape[1:])),
                     shuffled_batch,
                 )
-                train_state, total_loss = jax.lax.scan(_update_minbatch, train_state, minibatches)
-                update_state = (train_state, traj_batch, advantages, targets, rng)
+                agent_state, total_loss = jax.lax.scan(_update_minbatch, agent_state, minibatches)
+                update_state = (agent_state, traj_batch, advantages, targets, rng)
                 return update_state, total_loss
 
-            update_state = (train_state, traj_batch, advantages, targets, rng)
+            update_state = (agent_state, traj_batch, advantages, targets, rng)
             update_state, loss_info = jax.lax.scan(_update_epoch, update_state, None, config["UPDATE_EPOCHS"])
-            train_state = update_state[0]
+            agent_state = update_state[0]
             metric = traj_batch.info
-            runner_state = (train_state, env_state, last_obs, rng)
+            runner_state = (agent_state, env_state, last_obs, rep, rng)
             return runner_state, metric
 
-        # --- 5. Run Total Updates ---
+        # 5. Run Total Updates 
         rng, _rng = jax.random.split(rng)
-        runner_state = (train_state, env_state, obs, _rng)
+        runner_state = (agent_state, env_state, obs, rep, _rng)
         runner_state, metrics = jax.lax.scan(_update_step, runner_state, None, config["TOTAL_TIMESTEPS"] // (config["NUM_STEPS"] * num_envs))
         return {"runner_state": runner_state, "metrics": metrics}
 

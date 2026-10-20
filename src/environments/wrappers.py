@@ -2,9 +2,6 @@ import socialjax as sj
 import jax 
 import jax.numpy as jnp
 
-from numpy.typing import NDArray
-from typing import Any
-
 class Environment:
     def __init__(
             self, 
@@ -21,6 +18,9 @@ class Environment:
         self.n_agents = n_agents
         self.agents = [f"agent_{i}" for i in range(n_agents)]
 
+    def _stack(self, x):
+        return jnp.stack(x, axis=1) if isinstance(x, (list, tuple)) else x
+    
     def initialize(self, rng) -> tuple:
         """Initializes the environments"""
         # Vectorize the reset and step function for fast execution in jax
@@ -45,30 +45,15 @@ class Environment:
         }
         return obs_dict, state, rng
 
-    def step(self, rng, actions: dict[str, NDArray], state: Any):
-        """Takes a step in the environments"""
-        rng, *step_keys = jax.random.split(rng, self.n_envs + 1)
-        step_keys = jnp.stack(step_keys)
+    def step(self, rng, actions, state):
+        """actions: (n_envs, n_agents) int array.
+        Returns obs (E,A,H,W,C), state, rewards (E,A), dones (E,A), info"""
+        keys = jax.random.split(rng, self.n_envs)
+        actions_list = [actions[:, i] for i in range(self.n_agents)]
+        obs, state, rewards, dones, info = self.batch_step(keys, state, actions_list)
 
-        actions_list = [actions[agent] for agent in self.agents]
-        obs, next_state, rewards, dones, info = self.batch_step(step_keys, state, actions_list)
-
-        obs_dict = {
-            agent: obs[:, i] if isinstance(obs, jnp.ndarray) else obs[agent]
-            for i, agent in enumerate(self.agents)
-        }
-
-        rewards_arr = jnp.stack(rewards, axis=1) if isinstance(rewards, list) else rewards
-        rewards_dict = {
-            agent: rewards_arr[:, i]
-            for i, agent in enumerate(self.agents)
-        }
-
-        dones_dict = {
-            agent: dones[:, i] if dones.ndim > 1 else dones
-            for i, agent in enumerate(self.agents)
-        }
-        dones_dict["__all__"] = jnp.any(dones, axis=-1) if dones.ndim > 1 else dones
-
-        return obs_dict, next_state, rewards_dict, dones_dict, info, rng
+        obs, rewards, dones = self._stack(obs), self._stack(rewards), self._stack(dones)
+        if dones.ndim == 1:
+            dones = jnp.broadcast_to(dones[:, None], (self.n_envs, self.n_agents))
+        return obs, state, rewards, dones, info
 
