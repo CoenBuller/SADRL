@@ -19,59 +19,35 @@ class Transition(NamedTuple):
     info: dict
 
 
-# --- Reputation helpers ---
-def make_reputation_channel(n_agents, view_hw, own_pos):
-    """own_pos = (row, col) of the observing agent inside its own view window."""
-    H, W = view_hw
-    own = jnp.array(own_pos)
+# ------------------------- Reputation helpers ------------------------- #
 
-    def one_env(agent_locs, rep):  # (A, 3), (A,)
-        def one_observer(i):
-            rel = agent_locs[:, :2] - agent_locs[i, :2]                             # Relative position between agent i and other agents
-            dr, dc = rel[:, 0], rel[:, 1]          
-            d = agent_locs[i, 2]                                                    # Direction agent i is pointed at 
-
-            # rotate into the observer's frame (90 degree angles only)
-            er = jnp.select([d == 0, d == 1, d == 2, d == 3], [dr, dc, -dr, -dc])
-            ec = jnp.select([d == 0, d == 1, d == 2, d == 3], [dc, -dr, -dc, dr])
-            r, c = er + own[0], ec + own[1]
-
-            inb = (r >= 0) & (r < H) & (c >= 0) & (c < W)                           # Checks wether other agents are within FoV of agent i
-            r, c = jnp.clip(r, 0, H - 1), jnp.clip(c, 0, W - 1)
-            return jnp.zeros((H, W)).at[r, c].add(jnp.where(inb, rep, 0.0))         # Mask the agents not in FoV
-        
-        return jax.vmap(one_observer)(jnp.arange(n_agents))                         # (A, H, W)
-
-    batched = jax.vmap(one_env)
-
-    def add_reputation(obs, state, rep):                                            # Obs (E,A,H,W,C), rep (E,A)
-        chan = batched(state.agent_locs, rep)                                       # Create a reputation channel across (E,A) using vectorized one_env()
-        return jnp.concatenate([obs, chan[..., None].astype(obs.dtype)], axis=-1)   # Add the channel to the observation 
-
-    return add_reputation
-
-
-def update_reputation(rep, reward, decay):
-    r = reward - reward.mean(axis=1, keepdims=True)                                 # (E,A) - (E,A) -> (E,A)
-    return rep*decay + r*(1 - decay)                                                # rep(t) = rep(t-1)*gamma + dr(t)*(1-gamma)
 
 # ------------------------- Training Loop ------------------------- #
 def make_train(config):
     # Initialize environment and rng key
-    env = Environment(env_name=config["ENV_NAME"], n_agents=config["N_AGENTS"], n_envs=config["N_ENVS"], seed=config["SEED"])
+    env = Environment(
+        env_name=config["ENV_NAME"], 
+        n_agents=config["N_AGENTS"], 
+        n_envs=config["N_ENVS"],
+        seed=config["SEED"], 
+        own_pos=tuple(config["OWN_POS"]), 
+        decay_coef=config["REP_DECAY"],
+        )
     num_agents = env.n_agents
     num_envs = env.n_envs
     action_dim = env.env.action_space(0).n
     rng = jax.random.PRNGKey(config["SEED"])
 
     obs_shape = env.env.observation_space()[0].shape  #type:ignore : (H, W, C)
-    add_reputation = make_reputation_channel(num_agents, obs_shape[:2], config["OWN_POS"])
 
     def train(rng=rng):
         # 1. Init Network & Optimizer
         network = ActorCritic(action_dim=action_dim)
         rng, _rng = jax.random.split(rng)
-        init_x = jnp.zeros((num_envs * num_agents, *obs_shape[:2], obs_shape[2] + 1))
+        if env.reputation:
+            init_x = jnp.zeros((num_envs * num_agents, *obs_shape[:2], obs_shape[2] + 1))
+        else:
+            init_x = jnp.zeros((num_envs * num_agents, *obs_shape[:2], obs_shape[2]))
         network_params = network.init(_rng, init_x)
         
         tx = optax.chain(
@@ -81,10 +57,8 @@ def make_train(config):
         agent_state = TrainState.create(apply_fn=network.apply, params=network_params, tx=tx)
 
         # 2. Vectorized Reset (Restart the environment)
-        obs, env_state, rng = env.initialize(rng)
-        rep = jnp.zeros((num_envs, num_agents))                                         # At the start reputation is 0 for all agents
-        obs = add_reputation(obs, env_state, rep)                                       # Add the reputation channel to the observations
-
+        obs, (env_state, rep), rng = env.initialize(rng)
+ 
         # 3. Inner Rollout Step 
         def _env_step(runner_state, unused):
             agent_state, env_state, last_obs, rep, rng = runner_state
@@ -101,14 +75,9 @@ def make_train(config):
             actions_per_env = action.reshape((num_envs, num_agents))
 
             # Step parallel environments (wrapper step is already batched)
-            next_obs, next_env_state, reward, done, info = env.step(
-                _rng_step, actions_per_env, env_state
+            next_obs, (next_env_state, next_rep), reward, done, info = env.step(
+                _rng_step, actions_per_env, (env_state, rep)
             )
-
-            # Reputation update + extra obs channel
-            next_rep = update_reputation(rep, reward, config["REP_DECAY"])              # Own reputation function
-            next_rep = jnp.where(done, 0.0, next_rep)                                   # reset on episode end
-            next_obs = add_reputation(next_obs, next_env_state, next_rep)               # Add the reputation to the observation space
 
             # Flatten rewards and terminations to (num_envs * num_agents,)
             reward_flat = reward.reshape(-1)
