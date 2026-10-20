@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from src.environments.wrappers import Environment  # or from src.environments.wrappers import Environment
 
-env = Environment("clean_up", n_agents=5, n_envs=1)
+env = Environment("pd_arena", n_agents=5, n_envs=1)
 rng = jax.random.PRNGKey(seed=30)
 
 obs, (st, rep), rng = env.initialize(rng)

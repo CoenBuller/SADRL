@@ -1,11 +1,12 @@
 import jax
 import jax.numpy as jnp
 import optax
+import wandb
 
 from typing import NamedTuple
 from flax.training.train_state import TrainState
 
-from src.algorithms.IPPO import ActorCritic
+from src.algorithms.networks import ActorCritic
 from src.environments.wrappers import Environment
 
 class Transition(NamedTuple):
@@ -19,8 +20,7 @@ class Transition(NamedTuple):
     info: dict
 
 
-# ------------------------- Training Loop ------------------------- #
-def make_train(config):
+def make_train_IPPO(config):
     # Initialize environment and rng key
     env = Environment(
         env_name=config["ENV_NAME"], 
@@ -30,6 +30,7 @@ def make_train(config):
         own_pos=tuple(config["OWN_POS"]), 
         decay_coef=config["REP_DECAY"],
         )
+    
     num_agents = env.n_agents
     num_envs = env.n_envs
     action_dim = env.env.action_space(0).n
@@ -39,7 +40,7 @@ def make_train(config):
 
     def train(rng=rng):
         # 1. Init Network & Optimizer
-        network = ActorCritic(action_dim=action_dim)
+        network = ActorCritic(action_dim=action_dim, activation=config["ACTIVATION"])
         rng, _rng = jax.random.split(rng)
         if env.reputation:
             init_x = jnp.zeros((num_envs * num_agents, *obs_shape[:2], obs_shape[2] + 1))
@@ -74,12 +75,16 @@ def make_train(config):
  
         # 3. Inner Rollout Step 
         def _env_step(runner_state, unused):
-            agent_state, env_state, last_obs, rep, rng = runner_state
+            agent_state, env_state, last_obs, rep, update_step, rng = runner_state
             rng, _rng_action, _rng_step = jax.random.split(rng, 3)
 
             # Flatten across environments and agents for forward pass
             obs_batch = last_obs.reshape((num_envs * num_agents, *last_obs.shape[2:]))
-            logits, value = network.apply(agent_state.params, obs_batch)                # Forward pass with agents          
+            logits, value = network.apply(agent_state.params, obs_batch)                # Forward pass with agents     
+
+            # Squeeze value if shape is (B, 1) to avoid silent broadcasting issues
+            if value.ndim > 1 and value.shape[-1] == 1:                                 # type: ignore
+                value = value.squeeze(-1)                                               # type: ignore
             
             action = jax.random.categorical(_rng_action, logits)                        # Pick action
             log_prob = jax.nn.log_softmax(logits)[jnp.arange(action.shape[0]), action]  # Convert to log probabilities, used for GAE and loss
@@ -106,7 +111,7 @@ def make_train(config):
                 obs=obs_batch,
                 info=info,
             )
-            runner_state = (agent_state, next_env_state, next_obs, next_rep, rng)
+            runner_state = (agent_state, next_env_state, next_obs, next_rep, update_step, rng)
             return runner_state, transition
 
         # 4. Outer Update Step (Rollout + GAE + Update) 
@@ -120,9 +125,11 @@ def make_train(config):
                 )
 
             # COMPUTE GAE (Reverse Scan)
-            agent_state, env_state, last_obs, rep, rng = runner_state
+            agent_state, env_state, last_obs, update_step, rep, rng = runner_state
             last_obs_batch = last_obs.reshape((num_envs * num_agents, *last_obs.shape[2:])) #type: ignore
             _, last_val = network.apply(agent_state.params, last_obs_batch)
+            if last_val.ndim > 1 and last_val.shape[-1] == 1:                                   # type: ignore
+                last_val = last_val.squeeze(-1)                                                 # type: ignore
 
             # Generalized Advantage Estimation (GAE)
             def _calculate_gae(traj_batch, last_val):
@@ -204,14 +211,52 @@ def make_train(config):
             update_state = (agent_state, traj_batch, advantages, targets, rng)
             update_state, loss_info = jax.lax.scan(_update_epoch, update_state, None, config["UPDATE_EPOCHS"])
             agent_state = update_state[0]
-            metric = traj_batch.info
-            runner_state = (agent_state, env_state, last_obs, rep, rng)
-            return runner_state, metric
+
+
+           # -------------------- W&B LOGGING -------------------- #
+            total_loss, (loss_actor, loss_critic, entropy) = loss_info
+
+            def _log_to_wandb(metrics_dict):
+                if wandb.run is not None:
+                    wandb.log(metrics_dict)
+
+            metrics = {
+                "update_step": update_step,
+                "env_step": update_step * config["NUM_STEPS"] * num_envs,
+                "rollout/mean_reward": traj_batch.reward.mean(),
+                "rollout/std_reward": traj_batch.reward.std(),
+                "rollout/sum_reward": traj_batch.reward.sum(),
+                "rollout/mean_value": traj_batch.value.mean(),
+                "rollout/std_value": traj_batch.value.std(),
+                "rollout/mean_reputation": traj_batch.reputation.mean(),
+                "rollout/std_reputation": traj_batch.reputation.std(),
+                "losses/total_loss": total_loss.mean(),
+                "losses/actor_loss": loss_actor.mean(),
+                "losses/critic_loss": loss_critic.mean(),
+                "losses/entropy": entropy.mean(),
+            }
+
+            # Add any scalar stats present in traj_batch.info
+            if isinstance(traj_batch.info, dict):
+                for k, v in traj_batch.info.items():
+                    if isinstance(v, jnp.ndarray) and v.size > 0:
+                        metrics[f"env_info/{k}"] = v.mean()
+
+            if config["WANDB"]:
+                jax.debug.callback(_log_to_wandb, metrics)
+            # ----------------------------------------------------- #
+
+            update_step = update_step + 1
+            runner_state = (agent_state, env_state, last_obs, rep, update_step, rng)
+            return runner_state, metrics
 
         # 5. Run Total Updates 
         rng, _rng = jax.random.split(rng)
-        runner_state = (agent_state, env_state, obs, rep, _rng)
-        runner_state, metrics = jax.lax.scan(_update_step, runner_state, None, config["TOTAL_TIMESTEPS"] // (config["NUM_STEPS"] * num_envs))
+        initial_update_step = 0
+        runner_state = (agent_state, env_state, obs, rep, initial_update_step, _rng)
+        
+        num_updates = config["TOTAL_TIMESTEPS"] // (config["NUM_STEPS"] * num_envs)
+        runner_state, metrics = jax.lax.scan(_update_step, runner_state, None, num_updates)
         return {"runner_state": runner_state, "metrics": metrics}
 
     return train

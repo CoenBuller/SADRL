@@ -7,6 +7,7 @@ class Environment:
             self, 
             env_name: str, 
             n_agents: int, 
+            common_reward: bool=True,
             n_envs: int=256, 
             reputation: bool=True,
             decay_coef: float=0.9,
@@ -20,9 +21,11 @@ class Environment:
         self.n_envs = n_envs
         self.n_agents = n_agents
         self.agents = [f"agent_{i}" for i in range(n_agents)]
+
+        self.common_reward = common_reward
+
         self.reputation = reputation
         self.decay = decay_coef
-
         self.obs_space = self.env.observation_space()[0].shape                           # type: ignore
         self.own_pos = own_pos
         self.add_rep = self.make_reputation_channel(n_agents=self.n_agents, view_hw=self.obs_space[:2], own_pos=own_pos)
@@ -92,12 +95,19 @@ class Environment:
         env_state, rep = state
         obs, env_state, reward, done, info = self._step(key, actions, env_state)
 
+        def _common_reward(reward):
+            return reward.mean(axis=1, keepdims=True)
+
         if self.reputation:
             rep = self.update_reputation(rep, reward, self.decay) # type: ignore
             rep = jnp.where(done, 0.0, rep) # type: ignore
             obs = self.add_rep(obs, env_state, rep)
+            if self.common_reward:
+                return obs, (env_state, rep), _common_reward(reward), done, info
             return obs, (env_state, rep), reward, done, info
-        
+
+        if self.common_reward:
+            return obs, (env_state, rep), _common_reward(reward), done, info
         return obs, (env_state, 0), reward, done, info
 
     def make_reputation_channel(self, n_agents, view_hw, own_pos):
