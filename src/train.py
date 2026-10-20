@@ -80,14 +80,14 @@ def make_train_IPPO(config):
 
             # Flatten across environments and agents for forward pass
             obs_batch = last_obs.reshape((num_envs * num_agents, *last_obs.shape[2:]))
-            logits, value = network.apply(agent_state.params, obs_batch)                # Forward pass with agents     
+            pi, value = network.apply(agent_state.params, obs_batch)                # Forward pass with agents     
 
             # Squeeze value if shape is (B, 1) to avoid silent broadcasting issues
             if value.ndim > 1 and value.shape[-1] == 1:                                 # type: ignore
                 value = value.squeeze(-1)                                               # type: ignore
             
-            action = jax.random.categorical(_rng_action, logits)                        # Pick action
-            log_prob = jax.nn.log_softmax(logits)[jnp.arange(action.shape[0]), action]  # Convert to log probabilities, used for GAE and loss
+            action = pi.sample(seed=_rng_action)                                        # Pick action
+            log_prob = pi.log_prob(action)                                              # Convert to log probabilities, used for GAE and loss
 
             # Actions as (num_envs, num_agents) array
             actions_per_env = action.reshape((num_envs, num_agents))
@@ -158,8 +158,8 @@ def make_train_IPPO(config):
                     traj_batch, advantages, targets = batch_info
 
                     def _loss_fn(params, traj_batch, gae, targets):
-                        logits, value = network.apply(params, traj_batch.obs)
-                        log_prob = jax.nn.log_softmax(logits)[jnp.arange(traj_batch.action.shape[0]), traj_batch.action]
+                        pi, value = network.apply(params, traj_batch.obs)
+                        log_prob = pi.log_prob(traj_batch.action)
 
                         # Clipped policy objective
                         ratio = jnp.exp(log_prob - traj_batch.log_prob)             # Relative P of taking a_t in s_t under new policy compare to old policy
@@ -177,8 +177,7 @@ def make_train_IPPO(config):
                         loss_critic = 0.5 * jnp.maximum(value_losses, value_losses_clipped).mean()
 
                         # Entropy bonus
-                        probs = jax.nn.softmax(logits)
-                        entropy = -jnp.sum(probs * jax.nn.log_softmax(logits), axis=-1).mean()
+                        entropy = pi.entropy().mean()
 
                         total_loss = loss_actor + config["VF_COEF"] * loss_critic - config["ENT_COEF"] * entropy
                         return total_loss, (loss_actor, loss_critic, entropy)
