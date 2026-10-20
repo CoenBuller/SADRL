@@ -14,7 +14,7 @@ def main():
     # 2. Initialize Weights & Biases
     if config_dict["WANDB"]:
         wandb.init(
-            project="SocialJax-IPPO",
+            project="sadrl",
             entity="coen-sadrl",                    # Put your W&B username or team name here if needed
             config=config_dict,
             name=f"{config_dict['ALGO']}_{config_dict['ENV_NAME']}_{config_dict['SEED']}",
