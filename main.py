@@ -45,11 +45,11 @@ def main():
     # Since each metric is an array of shape (num_updates,), they align cleanly as columns.
     df = pd.DataFrame(metrics_np)
     df.to_csv("training_metrics.csv", index=False)
-    print("Metrics saved to training_metrics.csv")
+    print(f"Metrics saved to training_metrics_{config_dict['ALGO']}_{config_dict['ENV_NAME']}_{config_dict['SEED']}.csv")
 
     # 3. Option B: Save as a compressed NumPy file (Preserves exact JAX datatypes/shapes)
     np.savez_compressed("training_metrics.npz", **metrics_np)
-    print("Metrics saved to training_metrics.npz")
+    print(f"Metrics saved to training_metrics_{config_dict['ALGO']}_{config_dict['ENV_NAME']}_{config_dict['SEED']}.npz")
     
     if config_dict["WANDB"]:
         wandb.finish()
