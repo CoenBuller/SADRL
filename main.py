@@ -31,7 +31,7 @@ def main():
             project="sadrl",
             entity="coen-sadrl",                    # Put your W&B username or team name here if needed
             config=config_dict,
-            name=f"{config_dict['ALGO']}_{config_dict['ENV_NAME']}_{config_dict['SEED']}",
+            name=f"{config_dict['ALGO']}_{config_dict['ENV_NAME']}_{config_dict['SEED']}_rep_{config_dict['REPUTATION']}",
             monitor_gym=False,
             save_code=True,
         )

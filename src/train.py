@@ -23,10 +23,12 @@ class Transition(NamedTuple):
 def make_train_IPPO(config):
     # Initialize environment and rng key
     env = Environment(
+        common_reward=config["COMMON_REWARD"],
         env_name=config["ENV_NAME"], 
         n_agents=config["N_AGENTS"], 
         n_envs=config["N_ENVS"],
         seed=config["SEED"], 
+        reputation=config["REPUTATION"],
         own_pos=tuple(config["OWN_POS"]), 
         decay_coef=config["REP_DECAY"],
         )
