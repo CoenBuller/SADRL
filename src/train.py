@@ -41,25 +41,22 @@ def make_train_IPPO(config):
     obs_shape = env.env.observation_space()[0].shape  #type:ignore : (H, W, C)
 
     def train(rng=rng):
-        # 1. Init Network & Optimizer
+        # 1. Reset first, so the real obs shape is known
+        obs, (env_state, rep), rng = env.initialize(rng)
+
+        # 2. Init network from the real obs shape
         network = ActorCritic(action_dim=action_dim, activation=config["ACTIVATION"])
         rng, _rng = jax.random.split(rng)
-        if env.reputation:
-            init_x = jnp.zeros((num_envs * num_agents, *obs_shape[:2], obs_shape[2] + 1))
-        else:
-            init_x = jnp.zeros((num_envs * num_agents, *obs_shape[:2], obs_shape[2]))
+        init_x = jnp.zeros((num_envs * num_agents, *obs.shape[2:]))   # (B, H, W, C_actual)
         network_params = network.init(_rng, init_x)
 
+        # 3. Optimizer
         if config["ANNEAL_LR"]:
             num_updates = config["TOTAL_TIMESTEPS"] // (config["NUM_STEPS"] * num_envs)
             total_gradient_steps = num_updates * config["UPDATE_EPOCHS"] * config["NUM_MINIBATCHES"]
-            
             lr_schedule = optax.linear_schedule(
-                init_value=config["LR"],
-                end_value=0.0,
-                transition_steps=total_gradient_steps
+                init_value=config["LR"], end_value=0.0, transition_steps=total_gradient_steps
             )
-            
             tx = optax.chain(
                 optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
                 optax.adam(learning_rate=lr_schedule, eps=1e-5),
@@ -69,11 +66,8 @@ def make_train_IPPO(config):
                 optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
                 optax.adam(config["LR"], eps=1e-5),
             )
-            
-        agent_state = TrainState.create(apply_fn=network.apply, params=network_params, tx=tx)
 
-        # 2. Vectorized Reset (Restart the environment)
-        obs, (env_state, rep), rng = env.initialize(rng)
+        agent_state = TrainState.create(apply_fn=network.apply, params=network_params, tx=tx)
  
         # 3. Inner Rollout Step 
         def _env_step(runner_state, unused):
