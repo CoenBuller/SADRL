@@ -71,13 +71,10 @@ class Environment:
         obs, state = self.batch_reset(reset_keys)
         obs = self._stack(obs)
         
-        if self.reputation:
-            rep = jnp.zeros((self.n_envs, self.n_agents))
-            obs = self.add_rep(obs, state, rep)
-            return obs, (state, rep), rng
+        rep = jnp.zeros((self.n_envs, self.n_agents))
+        obs = self.add_rep(obs, state, rep)
+        return obs, (state, rep), rng
         
-        return obs, (state, 0), rng
-
     def _step(self, rng, actions, state):
         """actions: (n_envs, n_agents) int array.
         Returns obs (E,A,H,W,C), state, rewards (E,A), dones (E,A), info"""
@@ -96,8 +93,7 @@ class Environment:
         obs, env_state, reward, done, info = self._step(key, actions, env_state)
 
         def _common_reward(reward):
-            return reward.mean(axis=1, keepdims=True)
-
+            return jnp.broadcast_to(reward.mean(axis=1, keepdims=True), reward.shape)
         if self.reputation:
             rep = self.update_reputation(rep, reward, self.decay) # type: ignore
             rep = jnp.where(done, 0.0, rep) # type: ignore
@@ -108,7 +104,7 @@ class Environment:
 
         if self.common_reward:
             return obs, (env_state, rep), _common_reward(reward), done, info
-        return obs, (env_state, 0), reward, done, info
+        return obs, (env_state, rep), reward, done, info
 
     def make_reputation_channel(self, n_agents, view_hw, own_pos):
         """own_pos = (row, col) of the observing agent inside its own view window."""
@@ -136,7 +132,12 @@ class Environment:
 
         def add_reputation(obs, state, rep):                                            # Obs (E,A,H,W,C), rep (E,A)
             chan = batched(state.agent_locs, rep)                                       # Create a reputation channel across (E,A) using vectorized one_env()
-            return jnp.concatenate([obs, chan[..., None].astype(obs.dtype)], axis=-1)   # Add the channel to the observation 
+            return jnp.concatenate(
+                [
+                obs.astype(jnp.float32), 
+                chan[..., None].astype(jnp.float32)                                     # Add the channel to the observatio
+                ], 
+                axis=-1) 
 
         return add_reputation
 

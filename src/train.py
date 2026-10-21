@@ -125,7 +125,7 @@ def make_train_IPPO(config):
                 )
 
             # COMPUTE GAE (Reverse Scan)
-            agent_state, env_state, last_obs, update_step, rep, rng = runner_state
+            agent_state, env_state, last_obs, rep, update_step, rng = runner_state
             last_obs_batch = last_obs.reshape((num_envs * num_agents, *last_obs.shape[2:])) #type: ignore
             _, last_val = network.apply(agent_state.params, last_obs_batch)
             if last_val.ndim > 1 and last_val.shape[-1] == 1:                                   # type: ignore
@@ -194,7 +194,7 @@ def make_train_IPPO(config):
                 batch_size = config["NUM_STEPS"] * num_envs * num_agents
                 permutation = jax.random.permutation(_rng, batch_size)
                 
-                batch = (traj_batch, advantages, targets)
+                batch = (traj_batch._replace(info={}), advantages, targets)
                 batch = jax.tree_util.tree_map(lambda x: x.reshape((batch_size,) + x.shape[2:]), batch)
                 shuffled_batch = jax.tree_util.tree_map(lambda x: jnp.take(x, permutation, axis=0), batch)
                 

@@ -3,14 +3,26 @@ import wandb
 import dataclasses
 import numpy as np
 import pandas as pd
+import argparse
 
 # Adjust imports based on your project structure
 from src.config import Config
 from src.train import make_train_IPPO
 
 def main():
-    # 1. Load config and convert dataclass to dictionary
-    raw_config = Config()
+
+    p = argparse.ArgumentParser()
+    p.add_argument("--env", default=None)
+    p.add_argument("--seed", type=int, default=None)
+    args = p.parse_args()
+
+    overrides = {}
+    if args.env is not None:
+        overrides["ENV_NAME"] = args.env
+    if args.seed is not None:
+        overrides["SEED"] = args.seed
+
+    raw_config = dataclasses.replace(Config(), **overrides)
     config_dict = dataclasses.asdict(raw_config)
 
     # 2. Initialize Weights & Biases
@@ -43,13 +55,13 @@ def main():
     
     # 2. Option A: Save as a Pandas DataFrame / CSV (Recommended for easy plotting in notebooks)
     # Since each metric is an array of shape (num_updates,), they align cleanly as columns.
+    tag = f"{config_dict['ALGO']}_{config_dict['ENV_NAME']}_{config_dict['SEED']}"
     df = pd.DataFrame(metrics_np)
-    df.to_csv("training_metrics.csv", index=False)
-    print(f"Metrics saved to training_metrics_{config_dict['ALGO']}_{config_dict['ENV_NAME']}_{config_dict['SEED']}.csv")
+    df.to_csv(f"training_metrics_{tag}.csv", index=False)
 
     # 3. Option B: Save as a compressed NumPy file (Preserves exact JAX datatypes/shapes)
-    np.savez_compressed("training_metrics.npz", **metrics_np)
-    print(f"Metrics saved to training_metrics_{config_dict['ALGO']}_{config_dict['ENV_NAME']}_{config_dict['SEED']}.npz")
+    np.savez_compressed(f"training_metrics_{tag}.npz", **metrics_np)
+    print(f"Metrics saved to training_metrics_{tag}.csv/npz")
     
     if config_dict["WANDB"]:
         wandb.finish()

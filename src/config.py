@@ -33,5 +33,5 @@ class Config:
     GAMMA: float = 0.99
     GAE_LAMBDA: float = 0.95
     CLIP_EPS: float = 0.2
-    VG_COEF: float = 0.5 
+    VF_COEF: float = 0.5 
     ENT_COEF: float = 0.01
