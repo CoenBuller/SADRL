@@ -211,6 +211,16 @@ def make_train_IPPO(config):
            # -------------------- W&B LOGGING -------------------- #
             total_loss, (loss_actor, loss_critic, entropy) = loss_info
 
+            def _ep_ret(acc, x):
+                reward, done = x
+                acc = acc + reward
+                return acc * (1.0 - done), acc * done      # reset at episode end, emit finished return
+
+            _, finished = jax.lax.scan(
+                _ep_ret, jnp.zeros_like(traj_batch.reward[0]), (traj_batch.reward, traj_batch.done)
+            )
+            episode_return = finished.sum() / jnp.maximum(traj_batch.done.sum(), 1.0)
+
             def _log_to_wandb(metrics_dict):
                 if wandb.run is not None:
                     wandb.log(metrics_dict)
@@ -218,13 +228,13 @@ def make_train_IPPO(config):
             metrics = {
                 "update_step": update_step,
                 "env_step": update_step * config["NUM_STEPS"] * num_envs,
+                "rollout/episode_return": episode_return,
+                "rollout/mean_abs_reputation": jnp.abs(traj_batch.reputation).mean(),
+                "rollout/std_reputation": traj_batch.reputation.std(),
                 "rollout/mean_reward": traj_batch.reward.mean(),
                 "rollout/std_reward": traj_batch.reward.std(),
-                "rollout/sum_reward": traj_batch.reward.sum(),
                 "rollout/mean_value": traj_batch.value.mean(),
                 "rollout/std_value": traj_batch.value.std(),
-                "rollout/mean_reputation": traj_batch.reputation.mean(),
-                "rollout/std_reputation": traj_batch.reputation.std(),
                 "losses/total_loss": total_loss.mean(),
                 "losses/actor_loss": loss_actor.mean(),
                 "losses/critic_loss": loss_critic.mean(),

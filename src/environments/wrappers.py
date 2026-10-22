@@ -16,7 +16,7 @@ class Environment:
             ):
         
         """Wrapper class to interact with a specific SocialJax environment"""
-        self.env = sj.make(env_id=env_name, num_agents=n_agents)
+        self.env = sj.make(env_id=env_name, num_agents=n_agents, shared_rewards=False)
         self.seed = seed
         self.n_envs = n_envs
         self.n_agents = n_agents
@@ -142,9 +142,9 @@ class Environment:
         return add_reputation
 
     def update_reputation(self, rep, reward, decay):
-        r = reward - reward.mean(axis=1, keepdims=True)                                 # (E,A) - (E,A) -> (E,A), and exclude agents reward in mean calculation
-        rep = rep*decay + r*(1 - decay)                                                 # rep(t) = rep(t-1)*gamma + dr(t)*(1-gamma)
-        return rep
+        n = reward.shape[1]
+        r = (reward - reward.mean(axis=1, keepdims=True)) * n / (n - 1)   # r_i - mean_{j!=i} r_j
+        return rep * decay + r
 
     
 

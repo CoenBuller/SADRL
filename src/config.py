@@ -9,7 +9,11 @@ class Config:
     TOTAL_TIMESTEPS: int = int(3e8)
     NUM_STEPS: int = 1000
     SEED: int = 30
+
+    # Storage
     WANDB: bool = True
+    GIF_FRAMES: int = 1000
+    OUT_DIR: str = "results"
 
     # Reputation 
     OWN_POS: tuple[int, int] = (9, 5)
