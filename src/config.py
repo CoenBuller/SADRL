@@ -17,7 +17,7 @@ class Config:
 
     # Reputation 
     OWN_POS: tuple[int, int] = (9, 5)
-    REP_DECAY: float = 0.9
+    REP_DECAY: float = 0.95
 
     # Algorithm
     ALGO: str = "IPPO"
