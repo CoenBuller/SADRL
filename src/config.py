@@ -6,7 +6,7 @@ class Config:
     ENV_NAME: str = "gift"
     N_AGENTS: int = 5
     N_ENVS: int = 256
-    TOTAL_TIMESTEPS: int = int(1e8)
+    TOTAL_TIMESTEPS: int = int(3e8)
     NUM_STEPS: int = 1000
     SEED: int = 30
     WANDB: bool = True
