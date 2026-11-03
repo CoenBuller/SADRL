@@ -16,8 +16,8 @@ overwritten at every export, so please don't edit it by hand.
 | `02-dir1-team-ia.patch` | Direction 1: team reward plus an IA penalty on raw individual traces, a spatial trace channel, `agent_rewards` in `info` (`algorithms/IPPO/config/reward/team_ia.yaml`). |
 | `03-dir3-dual-critic.patch` | Direction 1, plus Direction 3: IPPO/MAPPO with a team critic and an individual critic (`research/dual_critic/`), `DUAL_MODE=blend`, `DUAL_GAMMA_TEAM`. |
 | `04-dir4-cc-mappo.patch` | Directions 1 and 3, plus counterfactual-credit MAPPO (`research/cc_mappo/`, credit modes coma/qret/loo/local, `CREDIT_NORM=team`). Also MAPPO Clean Up fixes: world state stored once per env step, PPO diagnostics logging, dead-actor check. |
-
 | `05-mappo-net-grid.patch` | Everything in 04, plus the MAPPO network grid (2026-11-03): `CNN_SIZE` / `FC_SIZE` (`small` = SocialJax MAPPO sizes, `full` = IPPO torso) for actor and critic, extra diagnostics (critic explained variance, actor/critic gradient norms, per-agent reward and clean-action ranks, end-of-training GIF in W&B), `tests/test_mappo_net_grid.py`, and the 24-run batch script `slurm/batch_2026-11-03_round10_grid.sh`. |
+
 Patches 02-05 branched off before the last updates to 01, so each one is complete on its own and
 they are not meant to be stacked.
 
