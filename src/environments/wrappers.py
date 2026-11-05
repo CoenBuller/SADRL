@@ -4,17 +4,16 @@ import jax.numpy as jnp
 
 class Environment:
     def __init__(
-            self, 
-            env_name: str, 
-            n_agents: int, 
+            self,
+            env_name: str,
+            n_agents: int,
             common_reward: bool=True,
-            n_envs: int=256, 
+            n_envs: int=256,
             reputation: bool=True,
             decay_coef: float=0.9,
             own_pos: tuple[int, int]=(9,5),
             seed: int=30
             ):
-        
         """Wrapper class to interact with a specific SocialJax environment"""
         self.env = sj.make(env_id=env_name, num_agents=n_agents, shared_rewards=False)
         self.seed = seed
@@ -72,7 +71,8 @@ class Environment:
         obs = self._stack(obs)
         
         rep = jnp.zeros((self.n_envs, self.n_agents))
-        obs = self.add_rep(obs, state, rep)
+        if self.reputation:
+            obs = self.add_rep(obs, state, rep)
         return obs, (state, rep), rng
         
     def _step(self, rng, actions, state):

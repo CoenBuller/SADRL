@@ -20,6 +20,8 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--env", default=None)
     p.add_argument("--seed", type=int, default=None)
+    p.add_argument("--num_steps", type=int, default=None)
+    p.add_argument("--rep", type=lambda x: (str(x).lower() in ['true', '1', 'yes']), default=None)
     args = p.parse_args()
 
     overrides = {}
@@ -27,6 +29,10 @@ def main():
         overrides["ENV_NAME"] = args.env
     if args.seed is not None:
         overrides["SEED"] = args.seed
+    if args.num_steps is not None:
+        overrides["NUM_STEPS"] = args.num_steps
+    if args.rep is not None:
+        overrides["REPUTATION"] = args.rep
 
     raw_config = dataclasses.replace(Config(), **overrides)
     config_dict = dataclasses.asdict(raw_config)
