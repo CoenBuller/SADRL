@@ -7,7 +7,7 @@ from typing import NamedTuple
 from flax.training.train_state import TrainState
 
 from src.algorithms.networks import MAPPOAC
-from src.environments.wrappers import Environment
+from environments.env_wrapper import Environment
 
 class Transition(NamedTuple):
     done: jnp.ndarray
@@ -47,7 +47,7 @@ def make_train_MAPPO(config):
         # 2. Init network from the real obs shape
         network = MAPPOAC(
             action_dim=action_dim, 
-            small=False, 
+            small=config["SMALL"], 
             activation=config["ACTIVATION"]
             )
         

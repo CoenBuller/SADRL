@@ -24,6 +24,7 @@ class Config:
     COMMON_REWARD: bool = True
     ACTIVATION: str = "relu"
     REPUTATION: bool = True
+    SMALL: bool = False # Use the small actor criti or not.
 
     # Optimization loop
     UPDATE_EPOCHS: int = 2

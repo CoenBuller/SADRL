@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as jnp
-from src.environments.wrappers import Environment
+from environments.env_wrapper import Environment
 
 env = Environment("pd_arena", n_agents=5, n_envs=2, reputation=True)
 rng = jax.random.PRNGKey(seed=42)
@@ -14,7 +14,7 @@ fake_rep = jnp.ones((env.n_envs, env.n_agents), dtype=jnp.float32) * 5.0
 
 obs, (st, rep_after), reward, done, info = env.step(step_key, actions, (st, fake_rep))
 
-assert not jnp.any(done), "Expected no dones at step 1"
+assert not jnp.any(done), "Expected no dones at step 1" # type: ignore
 assert jnp.all(rep_after != 0.0), "Reputation should remain non-zero when done=False!"
 print("Normal step passed! Reputations retained.")
 
@@ -26,12 +26,12 @@ original_step = env._step
 def mock_step(key, acts, state):
     o, s, r, d, i = original_step(key, acts, state)
     # Force Env 0 to be True, Env 1 to be False
-    d = d.at[0].set(True)
+    d = d.at[0].set(True) # type: ignore
     d = d.at[1].set(False)
     return o, s, r, d, i
 
 # Apply the mock
-env._step = mock_step
+env._step = mock_step # type: ignore
 
 rng, step_key = jax.random.split(rng)
 obs, (st_after, rep_after), reward, done, info = env.step(step_key, actions, (st, fake_rep))

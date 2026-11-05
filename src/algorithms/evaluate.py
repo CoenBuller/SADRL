@@ -2,7 +2,7 @@ import jax, jax.numpy as jnp, numpy as np, wandb
 from pathlib import Path
 from PIL import Image
 from src.algorithms.networks import ActorCritic
-from src.environments.wrappers import Environment
+from environments.env_wrapper import Environment
 
 
 def make_gif(params, config, num_frames=1000, out_dir="evaluation"):
