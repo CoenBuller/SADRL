@@ -80,12 +80,12 @@ class Environment:
         Returns obs (E,A,H,W,C), state, rewards (E,A), dones (E,A), info"""
         keys = jax.random.split(rng, self.n_envs)
         actions_list = [actions[:, i] for i in range(self.n_agents)]
-        obs, state, rewards, dones, info = self.batch_step(keys, state, actions_list)
+        obs, env_state, rewards, dones, info = self.batch_step(keys, state, actions_list)
 
         obs, rewards, dones = self._stack(obs), self._stack(rewards), self._stack(dones)
         if dones.ndim == 1: # type: ignore
             dones = jnp.broadcast_to(dones[:, None], (self.n_envs, self.n_agents))
-        return obs, state, rewards, dones, info
+        return obs, env_state, rewards, dones, info
 
     def step(self, key, actions, state):
 

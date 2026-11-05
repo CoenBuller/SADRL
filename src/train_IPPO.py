@@ -76,7 +76,7 @@ def make_train_IPPO(config):
 
             # Flatten across environments and agents for forward pass
             obs_batch = last_obs.reshape((num_envs * num_agents, *last_obs.shape[2:]))
-            pi, value = network.apply(agent_state.params, obs_batch)                # Forward pass with agents     
+            pi, value = network.apply(agent_state.params, obs_batch)                    # Forward pass with agents     
 
             # Squeeze value if shape is (B, 1) to avoid silent broadcasting issues
             if value.ndim > 1 and value.shape[-1] == 1:                                 # type: ignore

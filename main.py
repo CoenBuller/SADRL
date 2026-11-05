@@ -11,7 +11,8 @@ from flax.serialization import to_bytes
 
 # Adjust imports based on your project structure
 from src.config import Config
-from src.train import make_train_IPPO
+from train_IPPO import make_train_IPPO
+from train_MAPPO import make_train_MAPPO
 from src.algorithms.evaluate import make_gif
 
 def main():
@@ -42,8 +43,14 @@ def main():
         )
 
     # 3. Build and JIT compile the training loop
-    print("Compiling training loop (this may take a few minutes)...")
-    train_fn = make_train_IPPO(config_dict)
+
+    if config_dict["ALGO"] == "IPPO": 
+        print(f"Compiling IPPO training loop (this may take a few minutes)...")
+        train_fn = make_train_IPPO(config_dict)
+    else:
+        print(f"Compiling MAPPO training loop (this may take a few minutes)...")
+        train_fn = make_train_MAPPO(config_dict)
+        
     jit_train_fn = jax.jit(train_fn)
 
     # 4. Execute Training

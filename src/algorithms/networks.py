@@ -216,6 +216,7 @@ class Critic(nn.Module):
         return jnp.squeeze(value, axis=-1)
 
 
+
 # ============================================================================
 # MAPPO Small Network Architectures (features=16)
 # ============================================================================
@@ -355,3 +356,33 @@ class SmallCritic(nn.Module):
 
         # Squeeze to remove last dimension
         return jnp.squeeze(value, axis=-1)
+
+
+class MAPPOAC(nn.Module):
+    action_dim: int
+    small: bool = False
+    activation: str = "relu"
+
+    @nn.compact
+    def __call__(self, x):
+        obs, world = x[0], x[1]
+
+        if self.activation == "relu":
+            activation = nn.relu
+        else:
+            activation = nn.tanh
+
+        if self.small:
+            actor = SmallActor(
+                action_dim=self.action_dim,
+                activation=self.activation
+                )
+            critic = SmallCritic(activation=self.activation)
+        else:
+            actor = Actor(
+                action_dim=self.action_dim,
+                activation=self.activation,
+            )
+            critic = Critic(activation=self.activation)
+
+        return actor(obs), critic(world)
