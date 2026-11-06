@@ -24,8 +24,11 @@ class Config:
     COMMON_REWARD: bool = True
     ACTIVATION: str = "relu"
     REPUTATION: bool = True
-    SMALL: bool = False # Use the small actor criti or not.
+    SMALL: bool = False     # Use the small actor criti or not.
 
+    # RNN settings
+    RNN_WARMUP: int = 10    # If using RNN network and prediction features over the recurrent steps, we let it warm up for 's' steps 
+    WINDOW: int = 30        # RNN looks over a window of 30 steps
     # Optimization loop
     UPDATE_EPOCHS: int = 2
     NUM_MINIBATCHES: int = 500
