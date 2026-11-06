@@ -1,0 +1,48 @@
+# Base MAPPO Configuration
+# Common hyperparameters shared across all MAPPO experiments
+# Individual configs can override these defaults
+
+# MAPPO-specific training hyperparameters
+"LR": 0.001
+"NUM_ENVS": 256
+"NUM_STEPS": 1000
+"TOTAL_TIMESTEPS": 1e9
+"UPDATE_EPOCHS": 2
+"NUM_MINIBATCHES": 64
+"GAMMA": 0.99
+"GAE_LAMBDA": 0.95
+"CLIP_EPS": 0.2
+"ENT_COEF": 0.01
+"VF_COEF": 0.5
+"MAX_GRAD_NORM": 0.5
+"SCALE_CLIP_EPS": True
+"ACTIVATION": "relu"
+"LOG_ACTOR_HEALTH": False  # [SADRL fix 2026-10-21] Clean Up script only: log dead_frac_*, logit_std, actor_grad_norm (dead-actor check)
+"NETWORK_SIZE": "small"  # [SADRL fix 2026-10-20] small: SocialJax's MAPPO networks; full: IPPO's CNN torso (Clean Up script only)
+"CNN_SIZE": null  # [SADRL fix 2026-11-03] small | full, overrides NETWORK_SIZE for the conv layers (Clean Up script only)
+"FC_SIZE": null  # [SADRL fix 2026-11-03] small | full, overrides NETWORK_SIZE for both dense layers
+"CNN_LAYERS": null  # [SADRL fix 2026-11-05] number of 16 @ 3x3 conv layers in the small CNN (unset = 1, unchanged)
+
+# Reward shaping
+"REW_SHAPING_HORIZON": 2.5e6
+
+# Environment defaults (common settings)
+"ENV_KWARGS":
+  "num_inner_steps": 1000
+  "shared_rewards": True  # MAPPO typically uses common rewards
+  "cnn": True
+  "jit": True
+
+# Training settings
+"ANNEAL_LR": True
+"TUNE": False
+
+# Seed and evaluation
+"SEED": 30
+"NUM_SEEDS": 1
+"GIF_NUM_FRAMES": 250
+
+# WandB defaults
+"ENTITY": ""
+"PROJECT": "socialjax"
+"WANDB_MODE": "online"

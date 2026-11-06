@@ -8,6 +8,24 @@ at the commit in `BASE` (`9df972d`, "fix agents numbers", 2026-08-21).
 The patches are generated from a private working fork by an export script. This folder is
 overwritten at every export, so please don't edit it by hand.
 
+## Browse the code
+
+`code/` holds the same changes as plain files, so they can be read on GitHub without applying
+anything: every file that `06-round13-depth-cc.patch` adds or changes, at the same path as in
+SocialJax. The rest of SocialJax is unchanged, so `code/` alone doesn't run; to run it, apply a patch
+(see Usage). Good places to start:
+
+| Path | What it is |
+|---|---|
+| `code/research/cc_mappo/` | Counterfactual-credit MAPPO: credit modes (`credit.py`), networks, training loop |
+| `code/algorithms/MAPPO/mappo_cnn_cleanup.py` | MAPPO on Clean Up with our fixes, network options and diagnostics |
+| `code/algorithms/MAPPO/mappo_cnn_cc_cleanup.py` | Entry point for CC-MAPPO on Clean Up |
+| `code/research/dual_critic/` | IPPO/MAPPO with a team critic and an individual critic |
+| `code/research/mappo_grid/` | Run summaries, plots and the per-agent evaluation of saved actors |
+| `code/socialjax/environments/` | Inequity-aversion fix and IA support in the environments |
+| `code/tests/` | Tests (run as plain scripts) |
+| `code/slurm/`, `code/alice.sh` | Batch scripts for the ALICE cluster |
+
 ## Patches
 
 | Patch | Contents |

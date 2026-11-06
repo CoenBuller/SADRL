@@ -1,0 +1,12 @@
+# Direction 3 (2026-10-18): ippo_cnn_cleanup with a team critic and an individual critic (research/dual_critic).
+# Directions 1+3: add reward=team_ia (IPPO) or the team-IA ENV_KWARGS (MAPPO), DUAL_IND_REWARD=ia, REWARD=dual_ia.
+defaults:
+  - ippo_cnn_cleanup
+  - _self_
+
+DUAL_W: 0.5               # actor advantage = (1 - w) * norm(A_team) + w * norm(A_ind)
+DUAL_IND_REWARD: agent    # agent: r_i (info["agent_rewards"]); ia: r_i - IA penalty
+DUAL_MODE: dual           # dual: two critics; blend: one critic on (1 - w) * r_T + w * r_I (control, 2026-10-19)
+DUAL_GAMMA_TEAM: null     # discount of the team stream; null = GAMMA (2026-10-19)
+METRIC_SCALE_KEYS: [clean_action_info]
+REWARD: dual

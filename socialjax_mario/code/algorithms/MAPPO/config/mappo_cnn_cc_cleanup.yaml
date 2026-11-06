@@ -1,0 +1,10 @@
+# CC-MAPPO (2026-10-20, workbook rounds 6-7): mappo_cnn_cleanup with a credit critic (research/cc_mappo).
+# The shared IPPO/MAPPO setup (round 7, A.1) is passed on the command line, see slurm/batch_2026-10-20_round7.sh.
+defaults:
+  - mappo_cnn_cleanup
+  - _self_
+
+CREDIT_MODE: coma         # coma | qret | loo | local
+CREDIT_NORM: team         # team: credit / std(hat A) (2026-10-21, CC theory T.4); self: credit / std(credit) (round 7 B.4)
+METRIC_SCALE_KEYS: [clean_action_info]
+REWARD: cc

@@ -1,0 +1,10 @@
+# Direction 3 (2026-10-18): mappo_cnn_coins with a team critic and an individual critic (research/dual_critic).
+# Directions 1+3: add reward=team_ia (IPPO) or the team-IA ENV_KWARGS (MAPPO), DUAL_IND_REWARD=ia, REWARD=dual_ia.
+defaults:
+  - mappo_cnn_coins
+  - _self_
+
+DUAL_W: 0.5               # actor advantage = (1 - w) * norm(A_team) + w * norm(A_ind)
+DUAL_IND_REWARD: agent    # agent: r_i (info["agent_rewards"]); ia: r_i - IA penalty
+METRIC_SCALE_KEYS: [eat_own_coins]
+REWARD: dual

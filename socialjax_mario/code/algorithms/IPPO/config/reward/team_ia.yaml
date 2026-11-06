@@ -1,0 +1,19 @@
+# @package _global_
+# [SADRL fix 2026-10-18] Direction 1: team reward plus the Hughes IA penalty on the agents' raw individual rewards.
+#   u_i = R_team - alpha/(N-1) sum_j max(e_j - e_i, 0) - beta/(N-1) sum_j max(e_i - e_j, 0),  e = normalised trace (1 - gamma*lambda) * e.
+# Guilt only by default (Mario, round 2: 1.A); set beta per env on the CLI. The traces are visible as one spatial
+# channel (trace_j at agent j's cell); for the blind ablation pass ENV_KWARGS.inequity_aversion_observe_traces=False REWARD=team_ia_blind.
+ENV_KWARGS:
+  shared_rewards: True
+  inequity_aversion: True
+  enable_smooth_rewards: True
+  inequity_aversion_team_reward: True
+  inequity_aversion_normalize_trace: True
+  inequity_aversion_observe_traces: True
+  inequity_aversion_trace_view: spatial
+  inequity_aversion_alpha: 0.0
+  inequity_aversion_beta: 1.0
+REWARD: team_ia
+WANDB_TAGS:
+  - COMMON_REWARD
+  - TEAM_IA
