@@ -11,6 +11,7 @@ from flax.linen.initializers import constant, orthogonal
 from typing import Sequence
 import distrax
 import jax.numpy as jnp
+import jax
 
 
 class CNN(nn.Module):
@@ -357,6 +358,83 @@ class SmallCritic(nn.Module):
         # Squeeze to remove last dimension
         return jnp.squeeze(value, axis=-1)
 
+class RecurrentActor(nn.Module):
+    action_dim: int
+    warmup: int
+    hidden_dim: int = 32
+    
+
+    @nn.compact
+    def __call__(self , x):
+        obs = x # shape: (B, T, D) 
+        
+        # Create the LSTM cell -> Always has tanh as activation function
+        lstm = nn.LSTMCell(features=self.hidden_dim)
+        carry = lstm.initialize_carry(
+            jax.random.PRNGKey(0), 
+            (obs.shape[0], 1, obs.shape[2:]),
+            )
+
+        # Run LSTM over sequence: use for loop so we can use the hidden state to predict future states (to be implemented)
+        for t in range(x.shape[1]):
+            carry, output = lstm(carry, x[:, t])
+        
+        # Final dense to output full sequence
+        mean = nn.Dense(action_dim)(output) # type: ignore
+        pi = distrax.Categorical(logits=mean)
+
+        return carry, pi
+        
+
+class RecurrentCritic(nn.Module):
+    warmup: int
+    hidden_dim: int = 32
+    
+
+    @nn.compact
+    def __call__(self, x):
+        world_state = x # shape: (B, T, D) 
+        
+        # Create the LSTM cell -> Always has tanh as activation function
+        lstm = nn.LSTMCell(features=self.hidden_dim)
+        carry = lstm.initialize_carry(
+            jax.random.PRNGKey(0), 
+            (world_state.shape[0], 1, world_state.shape[2:]),
+            )
+
+        # Run LSTM over sequence
+        for t in range(x.shape[1]):
+            carry, output = lstm(carry, x[:, t])
+        
+        # Final dense to output full sequence
+        value = nn.Dense(1)(output) # type: ignore
+
+        if value.shape[-1] == 1 and len(value.shape) > 1:
+            jnp.squeeze(value, axis=-1)
+
+        return carry, value
+
+class RecurrentMAPPOAC(nn.Module):
+    action_dim: int
+    warmup: int
+    hidden_dim: int = 32
+
+    @nn.compact
+    def __call__(self, x):
+        obs = x[0] # shape: (batch_size, seq_len, obs_dim)
+        world = x[1] # shape: (batch_size, seq_len, world_dim)
+
+        critic = RecurrentCritic(
+            warmup=self.warmup,
+            hidden_dim=self.hidden_dim
+            )
+        actor = RecurrentActor(
+            warmup=self.warmup,
+            action_dim=self.action_dim, 
+            hidden_dim=self.hidden_dim
+            )
+
+        return actor(obs), critic(world)
 
 class MAPPOAC(nn.Module):
     action_dim: int
