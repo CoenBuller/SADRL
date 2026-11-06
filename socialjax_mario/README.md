@@ -26,6 +26,18 @@ SocialJax. The rest of SocialJax is unchanged, so `code/` alone doesn't run; to 
 | `code/tests/` | Tests (run as plain scripts) |
 | `code/slurm/`, `code/alice.sh` | Batch scripts for the ALICE cluster |
 
+## Results
+
+`results/` holds the results of the runs on Clean Up (seeds 30–32, 1e8 steps), one folder per
+experiment, each with a README (setup, table with W&B run ids, reading), the plots and a CSV per run:
+
+| Folder | What it is |
+|---|---|
+| `results/2026-11-06_round13/` | **Latest.** CNN depth, CC-MAPPO (qret, loo) against MAPPO, the rollout 2 × 2, and why CC-MAPPO sometimes never learns |
+| `results/2026-11-05_eval_agents/` | Per-agent evaluation of the saved actors: is there a lazy agent? (No.) |
+| `results/2026-11-03_mappo_grid/` | MAPPO network (CNN / FC size) × rollout (4 × 100, 32 × 1000) grid |
+| `results/gifs/` | One end-of-training episode per setting (seed 31) |
+
 ## Patches
 
 | Patch | Contents |
