@@ -107,7 +107,7 @@ def fig_rollout(runs):
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.4), sharey=True)
     for ax, x_of in zip(axes, ["steps", "updates"]):
         for k in keys:
-            band(ax, runs, k, x_of=x_of, label="4 × 100 (grid, 100-sample minibatches)" if k.startswith("MAPPO_grid") else None)
+            band(ax, runs, k, x_of=x_of, label="4 × 100 (grid)" if k.startswith("MAPPO_grid") else None)
         style(ax)
     axes[0].set_xlabel("Environment steps (millions)", fontsize=9)
     axes[0].set_xlim(0, 100)
