@@ -1,0 +1,31 @@
+# MAPPO Configuration for Cooperative Mining
+defaults:
+  - mappo_base
+
+# Environment-specific settings
+"ENV_NAME": "coop_mining"
+"LR": 0.0005
+"NUM_ENVS": 7
+"TOTAL_TIMESTEPS": 3e8
+"NUM_MINIBATCHES": 4
+
+"ENV_KWARGS": 
+  "num_agents": 6
+  "num_inner_steps": 1000
+  "shared_rewards": True
+  "num_outer_steps": 1
+  "max_miners": 4  # how many miners can we store per gold cell
+  "min_gold_miners": 2  # how many distinct miners needed to finalize gold
+  "mining_range": 3
+  "reward_iron": 1.0
+  "reward_gold": 8.0
+  "gold_mining_window": 3
+  "regrowth_prob_iron": 0.0004
+  "regrowth_prob_gold": 0.00016
+  "cnn": True
+  "jit": True
+
+# Reward settings
+"REWARD": "MAPPO"
+"WANDB_TAGS": 
+  - COMMON_REWARD

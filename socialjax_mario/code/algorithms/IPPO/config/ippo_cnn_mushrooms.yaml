@@ -1,0 +1,15 @@
+# IPPO Configuration for Mushrooms
+defaults:
+  - ippo_base
+  - _self_
+  - reward: common  # override on CLI: reward=individual
+
+# Environment-specific settings
+"ENV_NAME": "mushrooms"
+"LR": 0.0001
+
+"ENV_KWARGS":
+  "num_agents": 5
+  "num_inner_steps": 1000
+  "cnn": True
+  "jit": True
