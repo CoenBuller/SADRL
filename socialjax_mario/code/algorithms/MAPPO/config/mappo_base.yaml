@@ -29,6 +29,7 @@
 # Environment defaults (common settings)
 "ENV_KWARGS":
   "num_inner_steps": 1000
+  "self_channel_fix": True  # [SADRL fix 2026-11-06] fixed observation (upstream fb4ac0f); False = imported env, as in all runs before 2026-11-06
   "shared_rewards": True  # MAPPO typically uses common rewards
   "cnn": True
   "jit": True

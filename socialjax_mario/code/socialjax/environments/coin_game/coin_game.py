@@ -160,6 +160,7 @@ class CoinGame(MultiAgentEnv):
         num_inner_steps=1000,
         num_outer_steps=1,
         num_agents=2,
+        self_channel_fix=True,  # [SADRL fix 2026-11-06] False = the imported observation (self-channel off-by-one)
         shared_rewards=True,
         payoff_matrix=[[1, 1, -2], [1, 1, -2]],
         regrow_rate=0.0005,
@@ -207,6 +208,10 @@ class CoinGame(MultiAgentEnv):
     ):
 
         super().__init__(num_agents=num_agents)
+        # [SADRL fix 2026-11-06] Upstream fb4ac0f: agent k is one-hot channel k + len(Items) - 1, not k + len(Items).
+        # With the fix off (0), the observation is exactly the imported one: only the last agent sees itself.
+        self.self_channel_fix = bool(self_channel_fix)
+        self._scf = 1 if self.self_channel_fix else 0
         self.agents = list(range(num_agents))#, dtype=jnp.int16)
         self._agents = jnp.array(self.agents, dtype=jnp.int16) + len(Items)
         self.num_inner_steps = num_inner_steps
@@ -311,7 +316,7 @@ class CoinGame(MultiAgentEnv):
                 ) -> jnp.ndarray:
 
                 # get agent's one-hot
-                agent_element = jnp.array([jnp.int8(x[agent])])
+                agent_element = jnp.array([jnp.int8(x[agent - self._scf])])  # [SADRL fix 2026-11-06] self_channel_fix (upstream fb4ac0f)
 
                 # mask to check if any other agent exists there
                 mask = x[len(Items)-1:] > 0
@@ -337,11 +342,11 @@ class CoinGame(MultiAgentEnv):
                         state.freeze[
                             agent-len(Items)
                         ].max(axis=-1) > 0,
-                        item_idx >= len(Items)
+                        item_idx >= len(Items) - self._scf  # [SADRL fix 2026-11-06] self_channel_fix (upstream fb4ac0f)
                 )
 
                 show_inv_idxs = jnp.where(
-                    state.freeze[agent],
+                    state.freeze[agent - self._scf * len(Items)],  # [SADRL fix 2026-11-06] self_channel_fix (upstream fb4ac0f)
                     size=12, # since, in a setting where simultaneous interac-
                     fill_value=-1 # -tions can happen, only a max of 12 can
                 )[0] # happen at once (zap logic), regardless of pop size
@@ -350,11 +355,11 @@ class CoinGame(MultiAgentEnv):
                     jnp.logical_or(
                         jnp.logical_and(
                             show_inv_bool,
-                            jnp.isin(item_idx-len(Items), show_inv_idxs),
+                            jnp.isin(item_idx-len(Items)+self._scf, show_inv_idxs),  # [SADRL fix 2026-11-06] self_channel_fix (upstream fb4ac0f)
                         ),
                         agent_element
                     ),
-                    state.agent_invs[item_idx - len(Items)],
+                    state.agent_invs[item_idx - len(Items) + self._scf],  # [SADRL fix 2026-11-06] self_channel_fix (upstream fb4ac0f)
                     jnp.array([0, 0], dtype=jnp.int8)
                 )[0]
 
@@ -363,7 +368,7 @@ class CoinGame(MultiAgentEnv):
                 frozen = jnp.where(
                     other_agent,
                     state.freeze[
-                        item_idx-len(Items)
+                        item_idx-len(Items)+self._scf  # [SADRL fix 2026-11-06] self_channel_fix (upstream fb4ac0f)
                     ].max(axis=-1) > 0,
                     0
                 )

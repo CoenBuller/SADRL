@@ -11,7 +11,8 @@ Copy of algorithms/MAPPO/mappo_cnn_cleanup.py (with its 2026-10-20 world-state f
     updated afterwards on the same minibatches. Credit is used from the first update (round 6, C.3), normalised with one
     mean over the minibatch and scaled by the std of hat A_t (CREDIT_NORM=team, CC theory workbook T.4, 2026-10-21; was its own
     std, round 7 B.4, CREDIT_NORM=self).
-The runner_state layout is unchanged, so algorithms.MAPPO._runner saves and evaluates the actor as before.
+The runner_state layout is unchanged, so algorithms.MAPPO._runner saves and evaluates the actor as before (round 14 adds the
+gate state as a third element of the outer scan carry; out["runner_state"][0] is still the runner state).
 """
 from typing import NamedTuple
 
@@ -27,6 +28,7 @@ from algorithms.utils.networks import mappo_networks
 from algorithms.utils import batchify_dict, batchify_numpy, unbatchify
 from research.dual_critic.ippo_dual import _gae
 from research.cc_mappo.credit import CREDIT_MODES, CREDIT_NORMS, relative_others, baseline, credit, critic_prediction, normalise_credit
+from research.cc_mappo.credit import CREDIT_GATES, explained_variance, ev_smooth, gate_weight, gated_credit  # round 14 gate
 from research.cc_mappo.networks import CentralCreditCritic, LocalCreditCritic
 
 CLEAN_ACTION, STAY_ACTION = 8, 6  # socialjax/environments/cleanup/clean_up.py Actions
@@ -54,6 +56,10 @@ def make_train(config):
     assert mode in CREDIT_MODES, mode
     norm = config.get("CREDIT_NORM", "team")
     assert norm in CREDIT_NORMS, norm
+    gate = config.get("CREDIT_GATE", "none")  # round 14 (B.2, B.4): "ev" mixes hat A and the credit by the credit critic's EV
+    assert gate in CREDIT_GATES, gate
+    assert gate == "none" or mode in ("qret", "loo"), "the EV gate is a mixed baseline: only for G-based credits (qret, loo)"
+    gate_beta, gate_efull = float(config.get("GATE_BETA", 0.9)), float(config.get("GATE_EFULL", 0.5))
     assert config["ENV_KWARGS"].get("shared_rewards", False), "CC-MAPPO is defined on the team reward"
     scale_keys = list(config.get("METRIC_SCALE_KEYS", []))
     n_agents = env.num_agents
@@ -111,7 +117,7 @@ def make_train(config):
         obsv, env_state = jax.vmap(env.reset)(jax.random.split(_rng, config["NUM_ENVS"]))
 
         def _update_step(update_runner_state, unused):
-            runner_state, update_steps = update_runner_state
+            runner_state, update_steps, gate_ev = update_runner_state
 
             def _env_step(runner_state, step_idx):
                 train_states, env_state, last_obs, last_done, rng = runner_state
@@ -152,6 +158,12 @@ def make_train(config):
             last_val = critic_network.apply(train_states[1].params, last_ws).reshape(config["NUM_ACTORS"])
             advantages, targets = _gae(traj.done, traj.value, traj.reward, last_val, config["GAMMA"], config["GAE_LAMBDA"])
             credits = credit(mode, traj.cq, traj.probs, traj.action, targets)
+            if gate == "ev":  # round 14: w = 0 (plain MAPPO) until the credit critic explains the return, then the credit
+                gate_ev = ev_smooth(gate_ev, explained_variance(targets, critic_prediction(mode, traj.cq, traj.action)), gate_beta)
+                gate_w = gate_weight(gate_ev, gate_efull)
+                actor_credits = gated_credit(advantages, credits, gate_w)
+            else:
+                actor_credits = credits
 
             def _update_epoch(update_state, unused):
                 def _update_minbatch(train_states, batch):
@@ -198,7 +210,7 @@ def make_train(config):
                 assert batch_size == config["NUM_STEPS"] * config["NUM_ACTORS"]
                 perm = jax.random.permutation(_rng, batch_size)
                 batch = jax.tree_util.tree_map(lambda x: x.reshape((batch_size,) + x.shape[2:]),
-                                               (traj, advantages, targets, credits))
+                                               (traj, advantages, targets, actor_credits))
                 batch = jax.tree_util.tree_map(lambda x: jnp.take(x, perm, axis=0), batch)
                 minibatches = jax.tree_util.tree_map(
                     lambda x: jnp.reshape(x, [config["NUM_MINIBATCHES"], -1] + list(x.shape[1:])), batch)
@@ -216,8 +228,11 @@ def make_train(config):
                 metric[k] = metric[k] * config["ENV_KWARGS"]["num_inner_steps"]
             metric.update(credit_metrics(traj, advantages, credits, targets))
             metric["target_mean"] = targets.mean()
+            if gate == "ev":
+                metric["gate_w"] = gate_w
+                metric["gate_ev_smooth"] = gate_ev
             jax.debug.callback(lambda m: wandb.log(m), metric)
-            return ((train_states, env_state, last_obs, last_done, rng), update_steps), metric
+            return ((train_states, env_state, last_obs, last_done, rng), update_steps, gate_ev), metric
 
         def credit_metrics(traj, advantages, credits, targets):
             """Round 6, section 7: efficiency gap, credit by behaviour, credit per agent per episode, consistency."""
@@ -259,7 +274,7 @@ def make_train(config):
         rng, _rng = jax.random.split(rng)
         runner_state = ((actor_state, critic_state, cc_state), env_state, obsv,
                         jnp.zeros((config["NUM_ACTORS"]), dtype=bool), _rng)
-        runner_state, metric = jax.lax.scan(_update_step, (runner_state, 0), None, config["NUM_UPDATES"])
+        runner_state, metric = jax.lax.scan(_update_step, (runner_state, 0, jnp.float32(0.0)), None, config["NUM_UPDATES"])
         return {"runner_state": runner_state}
 
     return train

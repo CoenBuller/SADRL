@@ -49,3 +49,29 @@ def normalise_credit(credits, advantages, norm="team"):
     yet tell actions apart gives small updates instead of normalised critic noise (the coma/local collapse in the 2M speed runs)."""
     scale = advantages.std() if norm == "team" else credits.std()
     return (credits - credits.mean()) / (scale + 1e-8)
+
+
+# Round 14 (2026-11-06, B.2 and B.4): the explained-variance gate. With G the lambda-return, MAPPO's advantage is
+# hat A = G - V(s) and the qret/loo credit is c^i = G - b^i with a baseline b^i that never uses a^i. The actor gets
+#     A^i = (1 - w) hat A + w c^i = G - [(1 - w) V(s) + w b^i],
+# a mixed baseline that still ignores a^i, so the gradient stays unbiased for every w; the gate changes only the variance.
+# w = clip(e_bar / e_full, 0, 1), e_bar a running mean (weight beta) of the credit critic's explained variance, from 0.
+# Each batch EV is clipped to [-1, 1] first: before any reward Var(G) is ~1e-6 and the raw EV can be -1e3, which would
+# otherwise keep e_bar far below 0 for hundreds of updates after the critic starts to fit.
+CREDIT_GATES = ("none", "ev")
+
+
+def explained_variance(target, pred):
+    return 1.0 - jnp.var(target - pred) / (jnp.var(target) + 1e-8)
+
+
+def ev_smooth(prev, ev, beta):
+    return beta * prev + (1.0 - beta) * jnp.clip(ev, -1.0, 1.0)
+
+
+def gate_weight(ev_bar, e_full):
+    return jnp.clip(ev_bar / e_full, 0.0, 1.0)
+
+
+def gated_credit(advantages, credits, w):
+    return (1.0 - w) * advantages + w * credits

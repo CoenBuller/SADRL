@@ -11,7 +11,7 @@ overwritten at every export, so please don't edit it by hand.
 ## Browse the code
 
 `code/` holds the same changes as plain files, so they can be read on GitHub without applying
-anything: every file that `06-round13-depth-cc.patch` adds or changes, at the same path as in
+anything: every file that `07-round15-envfix-gate.patch` adds or changes, at the same path as in
 SocialJax. The rest of SocialJax is unchanged, so `code/` alone doesn't run; to run it, apply a patch
 (see Usage). Good places to start:
 
@@ -48,6 +48,7 @@ experiment, each with a README (setup, table with W&B run ids, reading), the plo
 | `04-dir4-cc-mappo.patch` | Directions 1 and 3, plus counterfactual-credit MAPPO (`research/cc_mappo/`, credit modes coma/qret/loo/local, `CREDIT_NORM=team`). Also MAPPO Clean Up fixes: world state stored once per env step, PPO diagnostics logging, dead-actor check. |
 | `05-mappo-net-grid.patch` | Everything in 04, plus the MAPPO network grid (2026-11-03): `CNN_SIZE` / `FC_SIZE` (`small` = SocialJax MAPPO sizes, `full` = IPPO torso) for actor and critic, extra diagnostics (critic explained variance, actor/critic gradient norms, per-agent reward and clean-action ranks, end-of-training GIF in W&B), `tests/test_mappo_net_grid.py`, and the 24-run batch script `slurm/batch_2026-11-03_round10_grid.sh`. |
 | `06-round13-depth-cc.patch` | Everything in 05 (now also in 01), plus (2026-11-05): `CNN_LAYERS` for the small MAPPO CNN (n × 16 @ 3×3), CC-MAPPO actor/critic chosen by `CNN_SIZE` / `FC_SIZE`, per-agent-id reward and clean logging (MAPPO and CC), credit diagnostics (`advantage_std`, `credit_adv_corr`, `credit_critic_explained_var`), the rollout 2 × 2 and depth/CC batch scripts, the grid summary/plot scripts and a per-agent evaluation of saved actors (`research/mappo_grid/`). Test: `tests/test_round13_depth_cc.py`. |
+| `07-round15-envfix-gate.patch` | Everything in 06, plus (2026-11-06): the **self-channel fix** from upstream `fb4ac0f` in all 7 environments, as an option `self_channel_fix` (default `True`; `False` gives back the imported observation, where only the last agent sees itself; every run before 2026-11-06 used that), and the **explained-variance gate** for CC-MAPPO (`CREDIT_GATE=ev`, `GATE_EFULL`, `GATE_BETA`). Tests: `tests/test_self_channel.py`, `tests/test_round15_gate.py`. |
 
 Patches 02-05 branched off before the last updates to 01, so each one is complete on its own and
 they are not meant to be stacked.
@@ -58,7 +59,7 @@ they are not meant to be stacked.
 git clone https://github.com/cooperativex/SocialJax.git socialjax
 cd socialjax
 git checkout "$(cat ../socialjax_mario/BASE)"
-git apply ../socialjax_mario/patches/04-dir4-cc-mappo.patch   # or 01 / 02 / 03 / 05 / 06
+git apply ../socialjax_mario/patches/04-dir4-cc-mappo.patch   # or 01 / 02 / 03 / 05 / 06 / 07
 python tests/test_inequity_aversion_fix.py                   # tests run as plain scripts
 ```
 

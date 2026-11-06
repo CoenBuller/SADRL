@@ -6,5 +6,8 @@ defaults:
 
 CREDIT_MODE: coma         # coma | qret | loo | local
 CREDIT_NORM: team         # team: credit / std(hat A) (2026-10-21, CC theory T.4); self: credit / std(credit) (round 7 B.4)
+CREDIT_GATE: none        # none | ev: mix hat A and the credit by the credit critic's explained variance (round 14, B.4)
+GATE_EFULL: 0.5          # EV at which the actor uses the credit alone
+GATE_BETA: 0.9           # running-mean weight of the EV, about 10 updates
 METRIC_SCALE_KEYS: [clean_action_info]
 REWARD: cc

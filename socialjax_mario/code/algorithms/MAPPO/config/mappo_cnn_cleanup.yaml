@@ -1,0 +1,23 @@
+# MAPPO Configuration for Clean Up
+defaults:
+  - mappo_base
+
+# Environment-specific settings
+"ENV_NAME": "clean_up"
+"NUM_ENVS": 4
+"NUM_STEPS": 100
+"TOTAL_TIMESTEPS": 3e8
+"NUM_MINIBATCHES": 4
+
+"ENV_KWARGS": 
+  "num_agents": 7
+  "self_channel_fix": True  # [SADRL fix 2026-11-06] fixed observation (upstream fb4ac0f); False = imported env, as in all runs before 2026-11-06
+  "num_inner_steps": 1000
+  "shared_rewards": True
+  "cnn": True
+  "jit": True
+
+# Reward settings
+"REWARD": "MAPPO"
+"WANDB_TAGS": 
+  - COMMON_REWARD
