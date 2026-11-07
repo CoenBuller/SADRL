@@ -14,48 +14,50 @@ from environments.env_wrapper import Environment
 class Transition(NamedTuple):
     done: jnp.ndarray                                         # (batch_size,)
     action: jnp.ndarray                                       # (batch_size,)
-    joint_action: jnp.ndarray                                 # (batch_size, num_agents) -> Ground truth for peer loss
     last_action: jnp.ndarray                                  # (batch_size,)
-    value: jnp.ndarray                                        # (batch_size,) -> Expected V_t = sum_a pi(a)Q(a)
-    q_taken: jnp.ndarray                                      # (batch_size,) -> Q(S_t, a_t^i, e_t^{-i})
+    value: jnp.ndarray                                        # (batch_size,) -> Baseline V_t = sum_a pi(a^i)Q(S_t, (a^i, a_t^{-i}))
+    q_taken: jnp.ndarray                                      # (batch_size,) -> Q(S_t, (a_t^i, a_t^{-i}))
     reward: jnp.ndarray                                       # (batch_size,)
     log_prob: jnp.ndarray                                     # (batch_size,)
     actor_obs: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]   # (obs_batch, dones_batch, last_action_batch)
-    critic_obs: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]  # (world_batch, agent_id_oh, last_joint_actions)
+    critic_obs: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]  # (world_batch, agent_id_oh, current_joint_actions)
     true_xy: jnp.ndarray                                      # (batch_size, 2) normalized in [0, 1]^2
     reputation: jnp.ndarray                                   # (batch_size,)
-    info: Any                                                 # FIX: Use Any instead of dict() instance
+    info: Any
 
 
 def extract_normalized_xy(
-    env_state: Any, 
-    obs: jnp.ndarray, 
-    num_envs: int, 
-    num_agents: int
-    ) -> jnp.ndarray:
+    env_state: Any,
+    obs: jnp.ndarray,
+    num_envs: int,
+    num_agents: int,
+) -> jnp.ndarray:
     """
     Safely extracts normalized (x, y) in [0, 1]^2 of shape (num_envs * num_agents, 2).
-    Handles both struct env_states with .agent_locs and raw grid env_states (num_envs, H, W, C).
     """
     if hasattr(env_state, "agent_locs"):
         map_h, map_w = env_state.grid.shape[1:3]
         raw_coords = env_state.agent_locs[:, :, :2].astype(jnp.float32)
-        scale = jnp.array([jnp.maximum(map_h - 1.0, 1.0), jnp.maximum(map_w - 1.0, 1.0)], dtype=jnp.float32)
+        scale = jnp.array(
+            [jnp.maximum(map_h - 1.0, 1.0), jnp.maximum(map_w - 1.0, 1.0)],
+            dtype=jnp.float32,
+        )
         return (raw_coords / scale).reshape((num_envs * num_agents, 2))
 
-    # Fallback when env_state is a raw grid tensor (num_envs, H, W, C)
-    # If own_pos is appended to obs or encoded in the last 2 channels, or we compute expected grid center:
     map_h, map_w = env_state.shape[1:3]
     ys = jnp.linspace(0.0, 1.0, map_h, dtype=jnp.float32)
     xs = jnp.linspace(0.0, 1.0, map_w, dtype=jnp.float32)
-    grid_y, grid_x = jnp.meshgrid(ys, xs, indexing="ij")  # (H, W)
+    grid_y, grid_x = jnp.meshgrid(ys, xs, indexing="ij")
 
-    # Compute soft center-of-mass over the last channel of env_state, broadcasted to (num_envs, num_agents, 2)
-    weights = nn.softmax(env_state[..., -1].reshape(num_envs, -1), axis=-1).reshape(num_envs, map_h, map_w)
+    weights = nn.softmax(
+        env_state[..., -1].reshape(num_envs, -1), axis=-1
+    ).reshape(num_envs, map_h, map_w)
     exp_y = (weights * grid_y[None, :, :]).sum(axis=(1, 2))
     exp_x = (weights * grid_x[None, :, :]).sum(axis=(1, 2))
-    env_xy = jnp.stack([exp_x, exp_y], axis=-1)  # (num_envs, 2)
-    return jnp.repeat(env_xy[:, None, :], num_agents, axis=1).reshape((num_envs * num_agents, 2))
+    env_xy = jnp.stack([exp_x, exp_y], axis=-1)
+    return jnp.repeat(env_xy[:, None, :], num_agents, axis=1).reshape(
+        (num_envs * num_agents, 2)
+    )
 
 
 def make_train_MAPPO(config):
@@ -111,16 +113,15 @@ def make_train_MAPPO(config):
             jnp.zeros((batch_size, num_agents), dtype=jnp.int32),
         )
 
-        # Add leading Time dimension (T=1) required by nn.scan in LSTM
         init_actor_obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], init_actor_obs)
         init_critic_obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], init_critic_obs)
 
         network_params = network.init(
-            _rng, 
-            init_hidden, 
-            init_actor_obs_t, 
-            init_critic_obs_t
-            )
+            _rng,
+            init_hidden,
+            init_actor_obs_t,
+            init_critic_obs_t,
+        )
 
         # 3. Optimizer Setup
         if config["ANNEAL_LR"]:
@@ -172,45 +173,48 @@ def make_train_MAPPO(config):
             agent_id_oh = jnp.repeat(
                 jnp.eye(num_agents)[None, :, :], num_envs, axis=0
             ).reshape((batch_size, num_agents))
-            last_joint_actions = jnp.repeat(
-                last_action[:, None, :], num_agents, axis=1
-            ).reshape((batch_size, num_agents))
 
-            # Store step inputs without Time dimension (jax.lax.scan will stack Time on axis=0)
+            # Step 4a: Run Actor first to sample current actions a_t
             actor_obs = (obs_batch, dones_batch, last_action_batch)
-            critic_obs = (world_batch, agent_id_oh, last_joint_actions)
-
-            # Add Time dimension (T=1) for single-step network execution
             actor_obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], actor_obs)
-            critic_obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], critic_obs)
 
-            out: MAPPOResult = network.apply(
+            new_hidden, pi, _ = network.apply(
                 agent_state.params,
                 hidden,
                 actor_obs_t,
-                critic_obs_t,
+                method=network.forward_actor,
             )  # type: ignore
 
-            # Squeeze temporary Time dimension (T=1)
-            action_seq = out.pi.sample(seed=_rng_action)
+            action_seq = pi.sample(seed=_rng_action)
             action = action_seq.squeeze(0)                        # (batch_size,)
-            log_prob = out.pi.log_prob(action_seq).squeeze(0)     # (batch_size,)
+            log_prob = pi.log_prob(action_seq).squeeze(0)         # (batch_size,)
+            probs = pi.probs.squeeze(0)                           # (batch_size, action_dim)
 
-            probs = out.pi.probs.squeeze(0)                       # (batch_size, action_dim)
-            q_vals = out.q_all_actions.squeeze(0)                 # (batch_size, action_dim)
+            # Form current joint action vector A_t = (a_t^1, ..., a_t^N) for each environment
+            actions_per_env = action.reshape((num_envs, num_agents))
+            current_joint_actions = jnp.repeat(
+                actions_per_env[:, None, :], num_agents, axis=1
+            ).reshape((batch_size, num_agents))
 
-            # Marginal Expected Value V(s) = sum_a pi(a) * Q(s, a)
+            # Step 4b: Run COMA Critic conditioned on S_t and current joint actions A_t
+            # (CounterFactualCritic internally masks out agent i's own action to get a_t^{-i})
+            critic_obs = (world_batch, agent_id_oh, current_joint_actions)
+            critic_obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], critic_obs)
+
+            q_vals_seq = network.apply(
+                agent_state.params,
+                critic_obs_t,
+                method=network.forward_critic,
+            )  # type: ignore
+            q_vals = q_vals_seq.squeeze(0)                        # (batch_size, action_dim)
+
+            # Counterfactual Baseline V(S_t, a_t^{-i}) = sum_{a^i} pi(a^i | h_t^i) * Q(S_t, (a^i, a_t^{-i}))
             value = (probs * q_vals).sum(axis=-1)                 # (batch_size,)
 
-            # Q-value of the specific action taken: Q(s, a_taken)
+            # Q-value of the specific action taken: Q(S_t, (a_taken^i, a_t^{-i}))
             q_taken = jnp.take_along_axis(
                 q_vals, action[:, None], axis=-1
             ).squeeze(-1)                                         # (batch_size,)
-
-            actions_per_env = action.reshape((num_envs, num_agents))
-            joint_action_batch = jnp.repeat(
-                actions_per_env[:, None, :], num_agents, axis=1
-            ).reshape((batch_size, num_agents))
 
             next_obs, (next_env_state, next_rep), reward, done, info = env.step(
                 _rng_step, actions_per_env, (env_state, rep)
@@ -220,18 +224,17 @@ def make_train_MAPPO(config):
                 env_state, last_obs, num_envs, num_agents
             )
 
-            done_flat = done.reshape((batch_size,)).astype(jnp.float32) # type: ignore
-            reward_flat = reward.reshape((batch_size,)).astype(jnp.float32) # type: ignore
+            done_flat = done.reshape((batch_size,)).astype(jnp.float32)      # type: ignore
+            reward_flat = reward.reshape((batch_size,)).astype(jnp.float32)  # type: ignore
 
             transition = Transition(
                 done=done_flat,
                 action=action,
-                joint_action=joint_action_batch,
                 last_action=last_action_batch,
                 value=value,
                 q_taken=q_taken,
                 reward=reward_flat,
-                log_prob=log_prob, # type: ignore
+                log_prob=log_prob,
                 actor_obs=actor_obs,
                 critic_obs=critic_obs,
                 true_xy=true_xy,
@@ -244,7 +247,7 @@ def make_train_MAPPO(config):
                 next_env_state,
                 next_obs,
                 next_rep,
-                out.hidden,
+                new_hidden,
                 actions_per_env,
                 done_flat,
                 update_step,
@@ -261,46 +264,58 @@ def make_train_MAPPO(config):
                 config["NUM_STEPS"],
             )
 
-            (agent_state,
-            env_state,
-            last_obs,
-            rep,
-            hidden,
-            last_action,
-            last_done,
-            update_step,
-            rng,
+            (
+                agent_state,
+                env_state,
+                last_obs,
+                rep,
+                hidden,
+                last_action,
+                last_done,
+                update_step,
+                rng,
             ) = runner_state
 
-            last_obs_batch = last_obs.reshape((batch_size, *last_obs.shape[2:])) # type: ignore
+            rng, _rng_boot = jax.random.split(rng)
+
+            last_obs_batch = last_obs.reshape((batch_size, *last_obs.shape[2:]))  # type: ignore
             last_world_batch = jnp.repeat(
                 env_state[:, None, ...], num_agents, axis=1
             ).reshape((batch_size, *env_state.shape[1:]))
+            agent_id_oh = jnp.repeat(
+                jnp.eye(num_agents)[None, :, :], num_envs, axis=0
+            ).reshape((batch_size, num_agents))
 
             actor_obs = (
                 last_obs_batch,
                 last_done.reshape((batch_size,)),
                 last_action.reshape((batch_size,)),
             )
-            critic_obs = (
-                last_world_batch,
-                jnp.repeat(
-                    jnp.eye(num_agents)[None, :, :], num_envs, axis=0
-                ).reshape((batch_size, num_agents)),
-                jnp.repeat(
-                    last_action[:, None, :], num_agents, axis=1
-                ).reshape((batch_size, num_agents)),
-            )
-
             actor_obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], actor_obs)
+
+            _, pi_last, _ = network.apply(
+                agent_state.params,
+                hidden,
+                actor_obs_t,
+                method=network.forward_actor,
+            )  # type: ignore
+
+            boot_action = pi_last.sample(seed=_rng_boot).squeeze(0)
+            boot_actions_per_env = boot_action.reshape((num_envs, num_agents))
+            boot_joint_actions = jnp.repeat(
+                boot_actions_per_env[:, None, :], num_agents, axis=1
+            ).reshape((batch_size, num_agents))
+
+            critic_obs = (last_world_batch, agent_id_oh, boot_joint_actions)
             critic_obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], critic_obs)
 
-            out_last: MAPPOResult = network.apply(
-                agent_state.params, hidden, actor_obs_t, critic_obs_t
-            )  # type: ignore
-            last_val = (
-                out_last.pi.probs.squeeze(0) * out_last.q_all_actions.squeeze(0)
-            ).sum(axis=-1)
+            q_last = network.apply(
+                agent_state.params,
+                critic_obs_t,
+                method=network.forward_critic,
+            ).squeeze(0)  # type: ignore
+
+            last_val = (pi_last.probs.squeeze(0) * q_last).sum(axis=-1)
 
             def _calculate_gae(traj_batch, last_val):
                 def _get_advantages(gae_and_next_value, transition):
@@ -343,6 +358,8 @@ def make_train_MAPPO(config):
                             mb_size, config["HIDDEN_DIM"]
                         )
 
+                        # Both actor_obs and critic_obs (containing current_joint_actions)
+                        # are already stored in traj_batch, so we run the full network in one pass
                         out: MAPPOResult = network.apply(
                             params,
                             init_hidden_mb,
@@ -353,7 +370,8 @@ def make_train_MAPPO(config):
                         pi = out.pi
                         log_prob = pi.log_prob(traj_batch.action)
 
-                        # 1. Counterfactual Advantage: A_cf = Q(s, a_taken) - sum_a pi(a) * Q(s, a)
+                        # 1. Exact COMA Counterfactual Advantage:
+                        # A_cf^i = Q(S_t, (a_taken^i, a_t^{-i})) - sum_{a'} pi(a' | h_t^i) * Q(S_t, (a', a_t^{-i}))
                         q_taken_pred = jnp.take_along_axis(
                             out.q_all_actions,
                             traj_batch.action[:, :, None],
@@ -363,7 +381,6 @@ def make_train_MAPPO(config):
                             jax.lax.stop_gradient(pi.probs) * out.q_all_actions
                         ).sum(axis=-1)
 
-                        # Stop-gradient on Counterfactual Advantage so actor loss doesn't corrupt Q-head
                         adv_cf = jax.lax.stop_gradient(q_taken_pred - value_pred)
                         adv_cf = (adv_cf - adv_cf.mean()) / (adv_cf.std() + 1e-8)
 
@@ -380,7 +397,7 @@ def make_train_MAPPO(config):
                         )
                         loss_actor = -jnp.minimum(loss_actor1, loss_actor2).mean()
 
-                        # 2. Critic Q-Value Loss (Clipped TD-target supervision)
+                        # 2. Critic Q-Value Loss (Clipped TD-target supervision on Q(S_t, A_t))
                         q_pred_clipped = traj_batch.q_taken + (
                             q_taken_pred - traj_batch.q_taken
                         ).clip(-config["CLIP_EPS"], config["CLIP_EPS"])
@@ -390,14 +407,7 @@ def make_train_MAPPO(config):
                             0.5 * jnp.maximum(q_losses, q_losses_clipped).mean()
                         )
 
-                        # 3. Peer-Policy Modeling Loss (Cross-Entropy against true joint actions)
-                        flat_peer_logits = out.peer_logits.reshape(-1, action_dim)
-                        flat_true_actions = traj_batch.joint_action.reshape(-1)
-                        loss_peer = optax.softmax_cross_entropy_with_integer_labels(
-                            flat_peer_logits, flat_true_actions
-                        ).mean()
-
-                        # 4. Self-Localization Loss (MSE against ground-truth normalized xy)
+                        # 3. Self-Localization Loss (MSE against ground-truth normalized xy)
                         loss_loc = jnp.square(
                             out.pred_xy - traj_batch.true_xy
                         ).mean()
@@ -408,14 +418,12 @@ def make_train_MAPPO(config):
                             loss_actor
                             + config["VF_COEF"] * loss_critic
                             - config["ENT_COEF"] * entropy
-                            + 0.1 * loss_peer
                             + 0.5 * loss_loc
                         )
                         return total_loss, (
                             loss_actor,
                             loss_critic,
                             entropy,
-                            loss_peer,
                             loss_loc,
                         )
 
@@ -462,12 +470,10 @@ def make_train_MAPPO(config):
             )
             agent_state = update_state[0]
 
-            # Unpack all 5 auxiliary loss terms returned by _loss_fn
             total_loss, (
                 loss_actor,
                 loss_critic,
                 entropy,
-                loss_peer,
                 loss_loc,
             ) = loss_info
 
@@ -502,7 +508,6 @@ def make_train_MAPPO(config):
                 "losses/total_loss": total_loss.mean(),
                 "losses/actor_loss": loss_actor.mean(),
                 "losses/critic_loss": loss_critic.mean(),
-                "losses/peer_loss": loss_peer.mean(),
                 "losses/loc_loss": loss_loc.mean(),
                 "losses/entropy": entropy.mean(),
             }

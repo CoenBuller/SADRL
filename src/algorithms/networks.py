@@ -2,7 +2,7 @@
 Shared neural network architectures for multi-agent reinforcement learning algorithms.
 """
 
-from typing import NamedTuple, Sequence
+from typing import NamedTuple, Optional, Sequence
 import functools
 import flax.linen as nn
 import numpy as np
@@ -18,7 +18,7 @@ class CNN(nn.Module):
     @nn.compact
     def __call__(self, x):
         activation = nn.relu if self.activation == "relu" else nn.tanh
-        batch_prefix = x.shape[:-3]  # Supports both (B, H, W, C) and (T, B, H, W, C)
+        batch_prefix = x.shape[:-3]  # Supports (B, H, W, C) and (T, B, H, W, C)
 
         x = nn.Conv(
             features=32,
@@ -44,7 +44,6 @@ class CNN(nn.Module):
         )(x)
         x = activation(x)
 
-        # FIX: Flatten only spatial/channel dims (-3, -2, -1), preserving (T, B) or (B,)
         x = x.reshape((*batch_prefix, -1))
 
         x = nn.Dense(
@@ -63,7 +62,7 @@ class SmallCNN(nn.Module):
     @nn.compact
     def __call__(self, x):
         activation = nn.relu if self.activation == "relu" else nn.tanh
-        batch_prefix = x.shape[:-3]  # Supports both (B, H, W, C) and (T, B, H, W, C)
+        batch_prefix = x.shape[:-3]
 
         x = nn.Conv(
             features=16,
@@ -73,7 +72,6 @@ class SmallCNN(nn.Module):
         )(x)
         x = activation(x)
 
-        # FIX: Flatten only spatial/channel dims (-3, -2, -1), preserving (T, B) or (B,)
         x = x.reshape((*batch_prefix, -1))
 
         x = nn.Dense(
@@ -230,7 +228,6 @@ class LSTM(nn.Module):
             rnn_state,
         )
 
-        # Use LSTM so carry is a single array matching initialize_carry
         new_rnn_state, y = nn.GRUCell(features=self.hidden_dim)(rnn_state, x)
         return new_rnn_state, y
 
@@ -262,7 +259,7 @@ class RecurrentActor(nn.Module):
             x=last_actions,
             num_classes=self.action_dim,
         )
-        rnn_in = jnp.concatenate((zt, oh_last_action), axis=-1)  # Shape: (T, B, D + |A|)
+        rnn_in = jnp.concatenate((zt, oh_last_action), axis=-1)
 
         new_hidden, rnn_out = LSTM(hidden_dim=self.hidden_dim)(hidden, (rnn_in, dones))
 
@@ -276,59 +273,45 @@ class RecurrentActor(nn.Module):
         )(actor_mean)
         pi = distrax.Categorical(logits=action_logits)
 
-        # Addition 1: Self-Localization Head f_loc(h_t^i) -> Normalized (x, y) in [0, 1]^2
+        # Self-Localization Head f_loc(h_t^i) -> Normalized (x, y) in [0, 1]^2
         pred_xy = nn.Dense(2, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(
             rnn_out
         )
-        pred_xy = nn.sigmoid(pred_xy)  # Shape: (T, B, 2)
+        pred_xy = nn.sigmoid(pred_xy)
 
         return new_hidden, pi, pred_xy
 
 
 class CounterFactualCritic(nn.Module):
+    """
+    Direct COMA Counterfactual Critic.
+    Takes global state S_t and current joint actions A_t, masks out ego-agent i's action
+    to form a_t^{-i}, and outputs Q(S_t, (a^i, a_t^{-i})) for all candidate ego actions a^i.
+    """
     action_dim: int
     num_agents: int
 
     @nn.compact
     def __call__(
         self,
-        env_state: jnp.ndarray,     # (T, B, H, W, C)
-        agent_id_oh: jnp.ndarray,   # (T, B, num_agents)
-        last_actions: jnp.ndarray,  # (T, B, num_agents)
-    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        env_state: jnp.ndarray,      # (T, B, H, W, C)
+        agent_id_oh: jnp.ndarray,    # (T, B, num_agents)
+        joint_actions: jnp.ndarray,  # (T, B, num_agents) -> CURRENT joint actions a_t
+    ) -> jnp.ndarray:
         batch_prefix = env_state.shape[:-3]  # (T, B)
 
-        # Feedforward CNN over global env state
+        # 1. Feedforward CNN over global env state S_t
         zt = CNN(activation="relu")(env_state)  # (T, B, 64)
 
-        # Flatten last joint actions one-hot: (T, B, num_agents * action_dim)
-        last_joint_oh = jax.nn.one_hot(last_actions, self.action_dim).reshape(
-            (*batch_prefix, -1)
-        )
+        # 2. One-hot encode current joint actions: (T, B, num_agents, action_dim)
+        joint_actions_oh = jax.nn.one_hot(joint_actions, self.action_dim)
 
-        # Peer-Policy Modeling Branch
-        peer_in = jnp.concatenate([zt, last_joint_oh, agent_id_oh], axis=-1)
-        peer_embed = nn.Dense(
-            64, kernel_init=orthogonal(jnp.sqrt(2)), bias_init=constant(0.0)
-        )(peer_in)
-        peer_embed = nn.relu(peer_embed)
+        # 3. Mask out ego-agent i's own action so the input strictly represents a_t^{-i}
+        peer_mask = 1.0 - agent_id_oh[..., None]  # (T, B, num_agents, 1)
+        masked_peers_oh = (joint_actions_oh * peer_mask).reshape((*batch_prefix, -1))
 
-        # Predict action logits for all agents: shape (T, B, num_agents, action_dim)
-        peer_logits = nn.Dense(
-            self.num_agents * self.action_dim,
-            kernel_init=orthogonal(0.01),
-            bias_init=constant(0.0),
-        )(peer_embed).reshape((*batch_prefix, self.num_agents, self.action_dim))
-
-        # Marginal Counterfactual Q-Head: Q(S_t, a^i, sg(e_t^{-i})) for all a^i in A
-        q_in = jnp.concatenate(
-            [
-                zt,
-                jax.lax.stop_gradient(peer_embed),
-                agent_id_oh,
-            ],
-            axis=-1,
-        )
+        # 4. Compute Q(S_t, (a^i, a_t^{-i})) for all candidate ego actions a^i simultaneously
+        q_in = jnp.concatenate([zt, masked_peers_oh, agent_id_oh], axis=-1)
         q_hidden = nn.Dense(
             128, kernel_init=orthogonal(jnp.sqrt(2)), bias_init=constant(0.0)
         )(q_in)
@@ -338,7 +321,7 @@ class CounterFactualCritic(nn.Module):
             self.action_dim, kernel_init=orthogonal(1.0), bias_init=constant(0.0)
         )(q_hidden)
 
-        return q_all_actions, peer_logits
+        return q_all_actions
 
 
 class MAPPOResult(NamedTuple):
@@ -346,7 +329,6 @@ class MAPPOResult(NamedTuple):
     pi: distrax.Categorical
     pred_xy: jnp.ndarray
     q_all_actions: jnp.ndarray
-    peer_logits: jnp.ndarray
 
 
 class RecurrentMAPPOAC(nn.Module):
@@ -356,35 +338,55 @@ class RecurrentMAPPOAC(nn.Module):
     activation: str = "relu"
     small: bool = True
 
-    @nn.compact
+    def setup(self):
+        self.actor = RecurrentActor(
+            action_dim=self.action_dim,
+            hidden_dim=self.hidden_dim,
+            activation=self.activation,
+            small=self.small,
+        )
+        self.critic = CounterFactualCritic(
+            action_dim=self.action_dim,
+            num_agents=self.num_agents,
+        )
+
     def __call__(
         self,
         hidden: jnp.ndarray,
         actor_obs: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray],
         critic_obs: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray],
     ) -> MAPPOResult:
-        q_all_actions, peer_logits = CounterFactualCritic(
-            action_dim=self.action_dim,
-            num_agents=self.num_agents,
-        )(
+        new_hidden, pi, pred_xy = self.actor(hidden, actor_obs)
+        q_all_actions = self.critic(
             env_state=critic_obs[0],
             agent_id_oh=critic_obs[1],
-            last_actions=critic_obs[2],
+            joint_actions=critic_obs[2],
         )
-
-        new_hidden, pi, pred_xy = RecurrentActor(
-            action_dim=self.action_dim,
-            hidden_dim=self.hidden_dim,
-            activation=self.activation,
-            small=self.small,
-        )(hidden, actor_obs)
 
         return MAPPOResult(
             hidden=new_hidden,
             pi=pi,
             pred_xy=pred_xy,
             q_all_actions=q_all_actions,
-            peer_logits=peer_logits,
+        )
+
+    def forward_actor(
+        self,
+        hidden: jnp.ndarray,
+        actor_obs: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray],
+    ) -> tuple[jnp.ndarray, distrax.Categorical, jnp.ndarray]:
+        """Runs only the RecurrentActor during rollout before joint actions are sampled."""
+        return self.actor(hidden, actor_obs)
+
+    def forward_critic(
+        self,
+        critic_obs: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray],
+    ) -> jnp.ndarray:
+        """Runs only the CounterFactualCritic once current joint actions are sampled."""
+        return self.critic(
+            env_state=critic_obs[0],
+            agent_id_oh=critic_obs[1],
+            joint_actions=critic_obs[2],
         )
 
 
