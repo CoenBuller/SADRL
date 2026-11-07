@@ -1,42 +1,24 @@
 """
 Shared neural network architectures for multi-agent reinforcement learning algorithms.
-
-This module contains CNN-based network architectures used across different MARL algorithms
-including IPPO, MAPPO, SVO, Inequity Aversion, and AAA.
 """
 
+from typing import NamedTuple, Sequence
+import functools
 import flax.linen as nn
 import numpy as np
 from flax.linen.initializers import constant, orthogonal
-from typing import Sequence
 import distrax
 import jax.numpy as jnp
 import jax
 
 
 class CNN(nn.Module):
-    """
-    Convolutional Neural Network for visual feature extraction.
-
-    Architecture:
-        - Conv2D (32 filters, 5x5 kernel)
-        - Conv2D (32 filters, 3x3 kernel)
-        - Conv2D (32 filters, 3x3 kernel)
-        - Dense (64 units)
-
-    All layers use orthogonal initialization with sqrt(2) scaling.
-
-    Attributes:
-        activation: Activation function name ("relu" or "tanh")
-    """
     activation: str = "relu"
 
     @nn.compact
     def __call__(self, x):
-        if self.activation == "relu":
-            activation = nn.relu
-        else:
-            activation = nn.tanh
+        activation = nn.relu if self.activation == "relu" else nn.tanh
+        batch_prefix = x.shape[:-3]  # Supports both (B, H, W, C) and (T, B, H, W, C)
 
         x = nn.Conv(
             features=32,
@@ -62,12 +44,42 @@ class CNN(nn.Module):
         )(x)
         x = activation(x)
 
-        x = x.reshape((x.shape[0], -1))  # Flatten
+        # FIX: Flatten only spatial/channel dims (-3, -2, -1), preserving (T, B) or (B,)
+        x = x.reshape((*batch_prefix, -1))
 
         x = nn.Dense(
             features=64,
             kernel_init=orthogonal(np.sqrt(2)),
-            bias_init=constant(0.0)
+            bias_init=constant(0.0),
+        )(x)
+        x = activation(x)
+
+        return x
+
+
+class SmallCNN(nn.Module):
+    activation: str = "relu"
+
+    @nn.compact
+    def __call__(self, x):
+        activation = nn.relu if self.activation == "relu" else nn.tanh
+        batch_prefix = x.shape[:-3]  # Supports both (B, H, W, C) and (T, B, H, W, C)
+
+        x = nn.Conv(
+            features=16,
+            kernel_size=(3, 3),
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
+        )(x)
+        x = activation(x)
+
+        # FIX: Flatten only spatial/channel dims (-3, -2, -1), preserving (T, B) or (B,)
+        x = x.reshape((*batch_prefix, -1))
+
+        x = nn.Dense(
+            features=16,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
         )(x)
         x = activation(x)
 
@@ -75,47 +87,23 @@ class CNN(nn.Module):
 
 
 class ActorCritic(nn.Module):
-    """
-    Combined Actor-Critic network for IPPO, SVO, and Inequity Aversion algorithms.
-
-    This network uses a shared CNN backbone with separate actor and critic heads.
-    Used in algorithms that don't require separate actor/critic networks.
-
-    Architecture:
-        - Shared CNN feature extractor
-        - Actor head: Dense(64) -> Dense(action_dim) -> Categorical distribution
-        - Critic head: Dense(64) -> Dense(1) -> Value estimate
-
-    Attributes:
-        action_dim: Number of discrete actions
-        activation: Activation function name ("relu" or "tanh")
-
-    Returns:
-        Tuple of (policy distribution, value estimate)
-    """
     action_dim: int
     activation: str = "relu"
 
     @nn.compact
     def __call__(self, x):
-        if self.activation == "relu":
-            activation = nn.relu
-        else:
-            activation = nn.tanh
-
+        activation = nn.relu if self.activation == "relu" else nn.tanh
         embedding = CNN(self.activation)(x)
 
-        # Actor head
         actor_mean = nn.Dense(
             64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
         )(embedding)
         actor_mean = activation(actor_mean)
         actor_mean = nn.Dense(
-            self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0) 
+            self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
         pi = distrax.Categorical(logits=actor_mean)
 
-        # Critic head
         critic = nn.Dense(
             64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
         )(embedding)
@@ -128,33 +116,12 @@ class ActorCritic(nn.Module):
 
 
 class Actor(nn.Module):
-    """
-    Standalone Actor network for MAPPO algorithm.
-
-    MAPPO uses separate actor and critic networks to allow independent parameter updates.
-    The actor takes per-agent observations and outputs action distributions.
-
-    Architecture:
-        - CNN feature extractor
-        - Dense(64) -> Dense(action_dim) -> Categorical distribution
-
-    Attributes:
-        action_dim: Number of discrete actions
-        activation: Activation function name ("relu" or "tanh")
-
-    Returns:
-        Categorical policy distribution over actions
-    """
     action_dim: int
     activation: str = "relu"
 
     @nn.compact
     def __call__(self, obs):
-        if self.activation == "relu":
-            activation = nn.relu
-        else:
-            activation = nn.tanh
-
+        activation = nn.relu if self.activation == "relu" else nn.tanh
         embedding = CNN(self.activation)(obs)
 
         actor_mean = nn.Dense(
@@ -165,40 +132,16 @@ class Actor(nn.Module):
             self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
 
-        pi = distrax.Categorical(logits=actor_mean)
-
-        return pi
+        return distrax.Categorical(logits=actor_mean)
 
 
 class Critic(nn.Module):
-    """
-    Standalone Critic network for MAPPO algorithm.
-
-    MAPPO critic takes world state (concatenated observations from all agents)
-    as input to estimate centralized value function.
-
-    Architecture:
-        - CNN feature extractor (processes world state)
-        - Dense(64) -> Dense(1) -> Value estimate
-
-    Attributes:
-        activation: Activation function name ("relu" or "tanh")
-
-    Returns:
-        Scalar value estimate (squeezed to remove last dimension)
-    """
     activation: str = "relu"
 
     @nn.compact
     def __call__(self, x):
-        world_state = x
-
-        if self.activation == "relu":
-            activation = nn.relu
-        else:
-            activation = nn.tanh
-
-        embedding = CNN(self.activation)(world_state)
+        activation = nn.relu if self.activation == "relu" else nn.tanh
+        embedding = CNN(self.activation)(x)
 
         hidden = nn.Dense(
             features=64,
@@ -213,90 +156,16 @@ class Critic(nn.Module):
             bias_init=constant(0.0),
         )(hidden)
 
-        # Squeeze to remove last dimension
         return jnp.squeeze(value, axis=-1)
 
 
-
-# ============================================================================
-# MAPPO Small Network Architectures (features=16)
-# ============================================================================
-# MAPPO uses smaller networks compared to IPPO/SVO for efficiency
-
-
-class SmallCNN(nn.Module):
-    """
-    Small Convolutional Neural Network for MAPPO algorithm.
-
-    This is a lighter version of CNN used specifically by MAPPO for faster training
-    with reduced model capacity.
-
-    Architecture:
-        - Conv2D (16 filters, 3x3 kernel) - single conv layer
-        - Dense (16 units)
-
-    All layers use orthogonal initialization with sqrt(2) scaling.
-
-    Attributes:
-        activation: Activation function name ("relu" or "tanh")
-    """
-    activation: str = "relu"
-
-    @nn.compact
-    def __call__(self, x):
-        if self.activation == "relu":
-            activation = nn.relu
-        else:
-            activation = nn.tanh
-
-        x = nn.Conv(
-            features=16,
-            kernel_size=(3, 3),
-            kernel_init=orthogonal(np.sqrt(2)),
-            bias_init=constant(0.0),
-        )(x)
-        x = activation(x)
-
-        x = x.reshape((x.shape[0], -1))  # Flatten
-
-        x = nn.Dense(
-            features=16,
-            kernel_init=orthogonal(np.sqrt(2)),
-            bias_init=constant(0.0)
-        )(x)
-        x = activation(x)
-
-        return x
-
-
 class SmallActor(nn.Module):
-    """
-    Small Actor network for MAPPO algorithm.
-
-    Uses SmallCNN backbone with reduced hidden layer size (16 instead of 64).
-    Designed for faster training in multi-agent scenarios.
-
-    Architecture:
-        - SmallCNN feature extractor
-        - Dense(16) -> Dense(action_dim) -> Categorical distribution
-
-    Attributes:
-        action_dim: Number of discrete actions
-        activation: Activation function name ("relu" or "tanh")
-
-    Returns:
-        Categorical policy distribution over actions
-    """
     action_dim: int
     activation: str = "relu"
 
     @nn.compact
     def __call__(self, obs):
-        if self.activation == "relu":
-            activation = nn.relu
-        else:
-            activation = nn.tanh
-
+        activation = nn.relu if self.activation == "relu" else nn.tanh
         embedding = SmallCNN(self.activation)(obs)
 
         actor_mean = nn.Dense(
@@ -307,40 +176,16 @@ class SmallActor(nn.Module):
             self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
 
-        pi = distrax.Categorical(logits=actor_mean)
-
-        return pi
+        return distrax.Categorical(logits=actor_mean)
 
 
 class SmallCritic(nn.Module):
-    """
-    Small Critic network for MAPPO algorithm.
-
-    Uses SmallCNN backbone with reduced hidden layer size (16 instead of 64).
-    Processes world state (concatenated agent observations) for centralized value estimation.
-
-    Architecture:
-        - SmallCNN feature extractor (processes world state)
-        - Dense(16) -> Dense(1) -> Value estimate
-
-    Attributes:
-        activation: Activation function name ("relu" or "tanh")
-
-    Returns:
-        Scalar value estimate (squeezed to remove last dimension)
-    """
     activation: str = "relu"
 
     @nn.compact
     def __call__(self, x):
-        world_state = x
-
-        if self.activation == "relu":
-            activation = nn.relu
-        else:
-            activation = nn.tanh
-
-        embedding = SmallCNN(self.activation)(world_state)
+        activation = nn.relu if self.activation == "relu" else nn.tanh
+        embedding = SmallCNN(self.activation)(x)
 
         hidden = nn.Dense(
             features=16,
@@ -355,86 +200,193 @@ class SmallCritic(nn.Module):
             bias_init=constant(0.0),
         )(hidden)
 
-        # Squeeze to remove last dimension
         return jnp.squeeze(value, axis=-1)
+
+
+class LSTM(nn.Module):
+    hidden_dim: int
+
+    @functools.partial(
+        nn.scan,
+        variable_broadcast="params",
+        in_axes=0,
+        out_axes=0,
+        split_rngs={"params": False},
+    )
+    @nn.compact
+    def __call__(
+        self,
+        carry: jnp.ndarray,
+        ins: tuple[jnp.ndarray, jnp.ndarray],
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """Applies GRUCell over time axis (axis=0) while resetting state on episode done."""
+        rnn_state = carry
+        x, dones = ins
+
+        reset_state = self.initialize_carry(x.shape[0], self.hidden_dim)
+        rnn_state = jnp.where(
+            dones[:, None] > 0.5,
+            reset_state,
+            rnn_state,
+        )
+
+        # Use LSTM so carry is a single array matching initialize_carry
+        new_rnn_state, y = nn.GRUCell(features=self.hidden_dim)(rnn_state, x)
+        return new_rnn_state, y
+
+    @staticmethod
+    def initialize_carry(batch_size: int, hidden_dim: int) -> jnp.ndarray:
+        return jnp.zeros((batch_size, hidden_dim), dtype=jnp.float32)
+
 
 class RecurrentActor(nn.Module):
     action_dim: int
-    warmup: int
+    activation: str = "relu"
     hidden_dim: int = 32
-    
+    small: bool = True
 
     @nn.compact
-    def __call__(self , x):
-        obs = x # shape: (B, T, D) 
-        
-        # Create the LSTM cell -> Always has tanh as activation function
-        lstm = nn.LSTMCell(features=self.hidden_dim)
-        carry = lstm.initialize_carry(
-            jax.random.PRNGKey(0), 
-            (obs.shape[0], 1, obs.shape[2:]),
-            )
+    def __call__(
+        self,
+        hidden: jnp.ndarray,
+        x: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray],
+    ) -> tuple[jnp.ndarray, distrax.Categorical, jnp.ndarray]:
+        obs, dones, last_actions = x  # Shapes: (T, B, H, W, C), (T, B), (T, B)
 
-        # Run LSTM over sequence: use for loop so we can use the hidden state to predict future states (to be implemented)
-        for t in range(x.shape[1]):
-            carry, output = lstm(carry, x[:, t])
-        
-        # Final dense to output full sequence
-        mean = nn.Dense(action_dim)(output) # type: ignore
-        pi = distrax.Categorical(logits=mean)
+        if self.small:
+            zt = SmallCNN(activation=self.activation)(obs)
+        else:
+            zt = CNN(activation=self.activation)(obs)
 
-        return carry, pi
-        
+        oh_last_action = jax.nn.one_hot(
+            x=last_actions,
+            num_classes=self.action_dim,
+        )
+        rnn_in = jnp.concatenate((zt, oh_last_action), axis=-1)  # Shape: (T, B, D + |A|)
 
-class RecurrentCritic(nn.Module):
-    warmup: int
-    hidden_dim: int = 32
-    
+        new_hidden, rnn_out = LSTM(hidden_dim=self.hidden_dim)(hidden, (rnn_in, dones))
+
+        # Policy Head
+        actor_mean = nn.Dense(
+            64, kernel_init=orthogonal(jnp.sqrt(2)), bias_init=constant(0.0)
+        )(rnn_out)
+        actor_mean = nn.relu(actor_mean)
+        action_logits = nn.Dense(
+            self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
+        )(actor_mean)
+        pi = distrax.Categorical(logits=action_logits)
+
+        # Addition 1: Self-Localization Head f_loc(h_t^i) -> Normalized (x, y) in [0, 1]^2
+        pred_xy = nn.Dense(2, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(
+            rnn_out
+        )
+        pred_xy = nn.sigmoid(pred_xy)  # Shape: (T, B, 2)
+
+        return new_hidden, pi, pred_xy
+
+
+class CounterFactualCritic(nn.Module):
+    action_dim: int
+    num_agents: int
 
     @nn.compact
-    def __call__(self, x):
-        world_state = x # shape: (B, T, D) 
-        
-        # Create the LSTM cell -> Always has tanh as activation function
-        lstm = nn.LSTMCell(features=self.hidden_dim)
-        carry = lstm.initialize_carry(
-            jax.random.PRNGKey(0), 
-            (world_state.shape[0], 1, world_state.shape[2:]),
-            )
+    def __call__(
+        self,
+        env_state: jnp.ndarray,     # (T, B, H, W, C)
+        agent_id_oh: jnp.ndarray,   # (T, B, num_agents)
+        last_actions: jnp.ndarray,  # (T, B, num_agents)
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        batch_prefix = env_state.shape[:-3]  # (T, B)
 
-        # Run LSTM over sequence
-        for t in range(x.shape[1]):
-            carry, output = lstm(carry, x[:, t])
-        
-        # Final dense to output full sequence
-        value = nn.Dense(1)(output) # type: ignore
+        # Feedforward CNN over global env state
+        zt = CNN(activation="relu")(env_state)  # (T, B, 64)
 
-        if value.shape[-1] == 1 and len(value.shape) > 1:
-            jnp.squeeze(value, axis=-1)
+        # Flatten last joint actions one-hot: (T, B, num_agents * action_dim)
+        last_joint_oh = jax.nn.one_hot(last_actions, self.action_dim).reshape(
+            (*batch_prefix, -1)
+        )
 
-        return carry, value
+        # Peer-Policy Modeling Branch
+        peer_in = jnp.concatenate([zt, last_joint_oh, agent_id_oh], axis=-1)
+        peer_embed = nn.Dense(
+            64, kernel_init=orthogonal(jnp.sqrt(2)), bias_init=constant(0.0)
+        )(peer_in)
+        peer_embed = nn.relu(peer_embed)
+
+        # Predict action logits for all agents: shape (T, B, num_agents, action_dim)
+        peer_logits = nn.Dense(
+            self.num_agents * self.action_dim,
+            kernel_init=orthogonal(0.01),
+            bias_init=constant(0.0),
+        )(peer_embed).reshape((*batch_prefix, self.num_agents, self.action_dim))
+
+        # Marginal Counterfactual Q-Head: Q(S_t, a^i, sg(e_t^{-i})) for all a^i in A
+        q_in = jnp.concatenate(
+            [
+                zt,
+                jax.lax.stop_gradient(peer_embed),
+                agent_id_oh,
+            ],
+            axis=-1,
+        )
+        q_hidden = nn.Dense(
+            128, kernel_init=orthogonal(jnp.sqrt(2)), bias_init=constant(0.0)
+        )(q_in)
+        q_hidden = nn.relu(q_hidden)
+
+        q_all_actions = nn.Dense(
+            self.action_dim, kernel_init=orthogonal(1.0), bias_init=constant(0.0)
+        )(q_hidden)
+
+        return q_all_actions, peer_logits
+
+
+class MAPPOResult(NamedTuple):
+    hidden: jnp.ndarray
+    pi: distrax.Categorical
+    pred_xy: jnp.ndarray
+    q_all_actions: jnp.ndarray
+    peer_logits: jnp.ndarray
+
 
 class RecurrentMAPPOAC(nn.Module):
     action_dim: int
-    warmup: int
+    num_agents: int
     hidden_dim: int = 32
+    activation: str = "relu"
+    small: bool = True
 
     @nn.compact
-    def __call__(self, x):
-        obs = x[0] # shape: (batch_size, seq_len, obs_dim)
-        world = x[1] # shape: (batch_size, seq_len, world_dim)
+    def __call__(
+        self,
+        hidden: jnp.ndarray,
+        actor_obs: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray],
+        critic_obs: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray],
+    ) -> MAPPOResult:
+        q_all_actions, peer_logits = CounterFactualCritic(
+            action_dim=self.action_dim,
+            num_agents=self.num_agents,
+        )(
+            env_state=critic_obs[0],
+            agent_id_oh=critic_obs[1],
+            last_actions=critic_obs[2],
+        )
 
-        critic = RecurrentCritic(
-            warmup=self.warmup,
-            hidden_dim=self.hidden_dim
-            )
-        actor = RecurrentActor(
-            warmup=self.warmup,
-            action_dim=self.action_dim, 
-            hidden_dim=self.hidden_dim
-            )
+        new_hidden, pi, pred_xy = RecurrentActor(
+            action_dim=self.action_dim,
+            hidden_dim=self.hidden_dim,
+            activation=self.activation,
+            small=self.small,
+        )(hidden, actor_obs)
 
-        return actor(obs), critic(world)
+        return MAPPOResult(
+            hidden=new_hidden,
+            pi=pi,
+            pred_xy=pred_xy,
+            q_all_actions=q_all_actions,
+            peer_logits=peer_logits,
+        )
+
 
 class MAPPOAC(nn.Module):
     action_dim: int
@@ -445,22 +397,11 @@ class MAPPOAC(nn.Module):
     def __call__(self, x):
         obs, world = x[0], x[1]
 
-        if self.activation == "relu":
-            activation = nn.relu
-        else:
-            activation = nn.tanh
-
         if self.small:
-            actor = SmallActor(
-                action_dim=self.action_dim,
-                activation=self.activation
-                )
+            actor = SmallActor(action_dim=self.action_dim, activation=self.activation)
             critic = SmallCritic(activation=self.activation)
         else:
-            actor = Actor(
-                action_dim=self.action_dim,
-                activation=self.activation,
-            )
+            actor = Actor(action_dim=self.action_dim, activation=self.activation)
             critic = Critic(activation=self.activation)
 
         return actor(obs), critic(world)

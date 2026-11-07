@@ -23,8 +23,9 @@ class Config:
     ALGO: str = "IPPO"
     COMMON_REWARD: bool = True
     ACTIVATION: str = "relu"
-    REPUTATION: bool = True
-    SMALL: bool = False     # Use the small actor criti or not.
+    REPUTATION: bool = False
+    SMALL: bool = True     # Use the small actor criti or not.
+    HIDDEN_DIM: int = 32
 
     # RNN settings
     RNN_WARMUP: int = 10    # If using RNN network and prediction features over the recurrent steps, we let it warm up for 's' steps 
