@@ -5,9 +5,9 @@ class Config:
     # Environment
     ENV_NAME: str = "gift"
     N_AGENTS: int = 5
-    N_ENVS: int = 256
-    TOTAL_TIMESTEPS: int = int(3e8)
-    NUM_STEPS: int = 1000
+    N_ENVS: int = 100
+    TOTAL_TIMESTEPS: int = int(1e8)
+    NUM_STEPS: int = 100
     SEED: int = 30
 
     # Storage
@@ -20,7 +20,7 @@ class Config:
     REP_DECAY: float = 0.95
 
     # Algorithm
-    ALGO: str = "IPPO"
+    ALGO: str = "Recurrent COMA"
     COMMON_REWARD: bool = True
     ACTIVATION: str = "relu"
     REPUTATION: bool = False
@@ -30,9 +30,10 @@ class Config:
     # RNN settings
     RNN_WARMUP: int = 10    # If using RNN network and prediction features over the recurrent steps, we let it warm up for 's' steps 
     WINDOW: int = 30        # RNN looks over a window of 30 steps
+
     # Optimization loop
-    UPDATE_EPOCHS: int = 2
-    NUM_MINIBATCHES: int = 500
+    UPDATE_EPOCHS: int = 10
+    NUM_MINIBATCHES: int = 100
 
     # Optimizer
     MAX_GRAD_NORM: float = 0.5

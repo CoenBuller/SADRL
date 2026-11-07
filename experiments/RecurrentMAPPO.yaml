@@ -1,0 +1,15 @@
+# Environment
+ENV_NAME: str = "cleanup"
+N_AGENTS: int = 5
+N_ENVS: int = 32
+NUM_STEPS: int = 100
+SEED: int = 30
+
+
+# Algorithm
+ALGO: str = "Recurrent COMA"
+
+NUM_MINIBATCHES: int = 50
+
+LR: float = 3e-4
+ENT_COEF: float = 0.05
