@@ -178,17 +178,17 @@ def make_train_MAPPO(config):
             actor_obs = (obs_batch, dones_batch, last_action_batch)
             actor_obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], actor_obs)
 
-            new_hidden, pi, _ = network.apply(
+            new_hidden, pi, _ = network.apply( # type: ignore
                 agent_state.params,
                 hidden,
                 actor_obs_t,
                 method=network.forward_actor,
             )  # type: ignore
 
-            action_seq = pi.sample(seed=_rng_action)
+            action_seq = pi.sample(seed=_rng_action)                               # type: ignore
             action = action_seq.squeeze(0)                        # (batch_size,)
-            log_prob = pi.log_prob(action_seq).squeeze(0)         # (batch_size,)
-            probs = pi.probs.squeeze(0)                           # (batch_size, action_dim)
+            log_prob = pi.log_prob(action_seq).squeeze(0)         # (batch_size,)# type: ignore
+            probs = pi.probs.squeeze(0)                           # (batch_size, action_dim)# type: ignore
 
             # Form current joint action vector A_t = (a_t^1, ..., a_t^N) for each environment
             actions_per_env = action.reshape((num_envs, num_agents))
@@ -206,7 +206,7 @@ def make_train_MAPPO(config):
                 critic_obs_t,
                 method=network.forward_critic,
             )  # type: ignore
-            q_vals = q_vals_seq.squeeze(0)                        # (batch_size, action_dim)
+            q_vals = q_vals_seq.squeeze(0)                        # (batch_size, action_dim) # type: ignore
 
             # Counterfactual Baseline V(S_t, a_t^{-i}) = sum_{a^i} pi(a^i | h_t^i) * Q(S_t, (a^i, a_t^{-i}))
             value = (probs * q_vals).sum(axis=-1)                 # (batch_size,)
@@ -293,14 +293,14 @@ def make_train_MAPPO(config):
             )
             actor_obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], actor_obs)
 
-            _, pi_last, _ = network.apply(
+            _, pi_last, _ = network.apply(# type: ignore
                 agent_state.params,
                 hidden,
                 actor_obs_t,
                 method=network.forward_actor,
             )  # type: ignore
 
-            boot_action = pi_last.sample(seed=_rng_boot).squeeze(0)
+            boot_action = pi_last.sample(seed=_rng_boot).squeeze(0)# type: ignore
             boot_actions_per_env = boot_action.reshape((num_envs, num_agents))
             boot_joint_actions = jnp.repeat(
                 boot_actions_per_env[:, None, :], num_agents, axis=1
@@ -315,7 +315,7 @@ def make_train_MAPPO(config):
                 method=network.forward_critic,
             ).squeeze(0)  # type: ignore
 
-            last_val = (pi_last.probs.squeeze(0) * q_last).sum(axis=-1)
+            last_val = (pi_last.probs.squeeze(0) * q_last).sum(axis=-1)# type: ignore
 
             def _calculate_gae(traj_batch, last_val):
                 def _get_advantages(gae_and_next_value, transition):
