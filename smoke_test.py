@@ -1,5 +1,5 @@
 """
-Self-contained smoke test script for Recurrent MAPPO with COMA and Spatial Grounding.
+Self-contained smoke test script for testing all MAPPO/COMA ablation baselines.
 Executes without external config files, validates JIT tracing, BPTT shapes,
 and asserts finite losses and gradient flow within < 2 GB VRAM.
 """
@@ -16,19 +16,20 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-
-from algorithms.RecurrentCOMA import make_train_MAPPO
-
-
+# Import the builders for all four ablations
+from src.algorithms.MAPPO import make_train_MAPPO
+from src.algorithms.RecurrentMAPPO import make_train_recurrent
+from src.algorithms.COMA import make_train_COMA
+from src.algorithms.RecurrentCOMA import make_train_recurrent_COMA
 
 def run_smoke_test():
-    print("=" * 60)
-    print("Starting Recurrent MAPPO Smoke Test")
+    print("=" * 80)
+    print("Starting Comprehensive Ablation Smoke Test")
     print(f"JAX backend: {jax.default_backend()} | Devices: {jax.devices()}")
-    print("=" * 60)
+    print("=" * 80)
 
     # Minimal test configuration for rapid compilation and low memory
-    test_config = {
+    base_config = {
         # Environment
         "ENV_NAME": "gift",
         "N_AGENTS": 5,
@@ -40,7 +41,6 @@ def run_smoke_test():
         "REP_DECAY": 0.95,
 
         # Algorithm & Network
-        "ALGO": "RecurrentMAPPO",
         "SMALL": True,
         "ACTIVATION": "relu",
         "HIDDEN_DIM": 16,
@@ -68,49 +68,76 @@ def run_smoke_test():
         "GIF_FRAMES": 0,
     }
 
-    print("\n[1/3] Building training graph...")
-    train_fn = make_train_MAPPO(test_config)
-    jit_train_fn = jax.jit(train_fn)
+    ablations = {
+        "MAPPO (Feedforward + Scalar Critic)": make_train_MAPPO,
+        "RecurrentMAPPO (RNN + Scalar Critic)": make_train_recurrent,
+        "COMA (Feedforward + COMA Critic)": make_train_COMA,
+        "RecurrentCOMA (RNN + COMA Critic)": make_train_recurrent_COMA,
+    }
 
-    print("[2/3] Compiling and running training loop (tracing JIT + BPTT)...")
-    rng = jax.random.PRNGKey(test_config["SEED"])
-    output = jit_train_fn(rng)
+    for algo_name, train_builder in ablations.items():
+        print(f"\n{'=' * 80}")
+        print(f"Testing: {algo_name}")
+        print(f"{'=' * 80}")
+        
+        # Inject the algo name into the config
+        test_config = base_config.copy()
+        test_config["ALGO"] = algo_name.split()[0] # Grab the prefix just in case it's used internally
+        
+        try:
+            print("[1/3] Building training graph...")
+            train_fn = train_builder(test_config)
+            jit_train_fn = jax.jit(train_fn)
 
-    print("[3/3] Inspecting execution artifacts and loss values...")
-    runner_state = output["runner_state"]
-    metrics = output["metrics"]
+            print("[2/3] Compiling and running training loop (tracing JIT + BPTT)...")
+            rng = jax.random.PRNGKey(test_config["SEED"])
+            output = jit_train_fn(rng)
 
-    # Pull metrics to host
-    metrics_np = jax.tree_util.tree_map(lambda x: np.array(x), metrics)
+            print("[3/3] Inspecting execution artifacts and loss values...")
+            runner_state = output["runner_state"]
+            metrics = output["metrics"]
 
-    total_loss = metrics_np["losses/total_loss"]
-    actor_loss = metrics_np["losses/actor_loss"]
-    critic_loss = metrics_np["losses/critic_loss"]
-    loc_loss = metrics_np["losses/loc_loss"]
+            # Pull metrics to host
+            metrics_np = jax.tree_util.tree_map(lambda x: np.array(x), metrics)
 
-    print("\n--- Metric Summary Across Updates ---")
-    for i in range(len(total_loss)):
-        print(
-            f"Update {i+1}: "
-            f"Total Loss = {total_loss[i]:.4f} | "
-            f"Actor = {actor_loss[i]:.4f} | "
-            f"Critic = {critic_loss[i]:.4f} | "
-            f"Loc = {loc_loss[i]:.4f}"
-        )
+            total_loss = metrics_np["losses/total_loss"]
+            actor_loss = metrics_np["losses/actor_loss"]
+            critic_loss = metrics_np["losses/critic_loss"]
+            
+            # loc_loss only exists in recurrent ablations
+            loc_loss = metrics_np.get("losses/loc_loss", None)
 
-    # Sanity Assertions
-    assert not np.isnan(total_loss).any(), "Assertion failed: NaN detected in total_loss"
-    assert not np.isinf(total_loss).any(), "Assertion failed: Inf detected in total_loss"
-    assert not np.isnan(loc_loss).any(), "Assertion failed: NaN detected in loc_loss"
-    assert not np.isnan(critic_loss).any(), "Assertion failed: NaN detected in critic_loss"
+            print(f"\n--- Metric Summary Across Updates ({algo_name}) ---")
+            for i in range(len(total_loss)):
+                loc_str = f" | Loc = {loc_loss[i]:.4f}" if loc_loss is not None else ""
+                print(
+                    f"Update {i+1}: "
+                    f"Total Loss = {total_loss[i]:.4f} | "
+                    f"Actor = {actor_loss[i]:.4f} | "
+                    f"Critic = {critic_loss[i]:.4f}{loc_str}"
+                )
 
-    # Verify agent state params updated
-    trained_params = runner_state[0].params
-    assert trained_params is not None, "Assertion failed: Network params are None"
+            # Sanity Assertions
+            assert not np.isnan(total_loss).any(), f"[{algo_name}] Assertion failed: NaN detected in total_loss"
+            assert not np.isinf(total_loss).any(), f"[{algo_name}] Assertion failed: Inf detected in total_loss"
+            assert not np.isnan(critic_loss).any(), f"[{algo_name}] Assertion failed: NaN detected in critic_loss"
+            if loc_loss is not None:
+                assert not np.isnan(loc_loss).any(), f"[{algo_name}] Assertion failed: NaN detected in loc_loss"
 
-    print("=" * 60)
-    print("ALL CHECKS PASSED: Environment, Actor BPTT, Critic COMA, and Aux Heads run cleanly.")
-    print("=" * 60)
+            # Verify agent state params updated
+            trained_params = runner_state[0].params
+            assert trained_params is not None, f"[{algo_name}] Assertion failed: Network params are None"
+            
+            print(f"\n✅ {algo_name.split()[0]} PASSED")
+            
+        except Exception as e:
+            print(f"\n❌ {algo_name.split()[0]} FAILED: {str(e)}")
+            import traceback
+            traceback.print_exc()
+
+    print("\n" + "=" * 80)
+    print("ALL ABLATION SMOKE TESTS FINISHED.")
+    print("=" * 80)
 
 
 if __name__ == "__main__":

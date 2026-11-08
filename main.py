@@ -75,14 +75,19 @@ def main():
         )
 
     # 6. Build and JIT compile the training loop
-    if config_dict["ALGO"] == "IPPO": 
-        print("Compiling IPPO training loop (this may take a few minutes)...")
+    algo = config_dict["ALGO"]
+    if algo == "IPPO":
         train_fn = make_train_IPPO(config_dict)
-    elif config_dict["ALGO"] in ["MAPPO", "RecurrentMAPPO"]:
-        print(f"Compiling {config_dict['ALGO']} training loop (this may take a few minutes)...")
-        train_fn = make_train_MAPPO(config_dict)
+    elif algo == "MAPPO":
+        train_fn = make_train_basic_MAPPO(config_dict)
+    elif algo == "RecurrentMAPPO":
+        train_fn = make_train_recurrent_only(config_dict)
+    elif algo == "COMA":
+        train_fn = make_train_COMA_only(config_dict)
+    elif algo == "RecurrentCOMA":
+        train_fn = make_train_recurrent_COMA(config_dict)
     else:
-        raise ValueError(f"Unknown ALGO: {config_dict['ALGO']}")
+        raise ValueError(f"Unknown ALGO: {algo}")
         
     jit_train_fn = jax.jit(train_fn)
 
