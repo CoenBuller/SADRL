@@ -9,6 +9,8 @@ from algorithms.utils.networks import (
     SmallActor,
     SmallCritic,
     mappo_networks,  # [SADRL fix 2026-11-03]
+    add_agent_id,  # [SADRL fix 2026-11-08] AGENT_ID (round 16, A.1)
+    agent_id_dim,  # [SADRL fix 2026-11-08]
     mappo_network_sizes,
 )
 

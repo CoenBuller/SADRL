@@ -10,6 +10,7 @@ import numpy as np
 from flax.linen.initializers import constant, orthogonal
 from typing import Sequence
 import distrax
+import jax  # [SADRL fix 2026-11-08] jax.nn.one_hot in add_agent_id
 import jax.numpy as jnp
 
 
@@ -387,17 +388,34 @@ class MixedCNN(nn.Module):
         return activation(x)
 
 
+def add_agent_id(obs, agent, num_agents):
+    """[SADRL fix 2026-11-08] Append agent ids as num_agents constant one-hot channels (round 16, A.1: AGENT_ID).
+
+    obs (..., H, W, C), agent (...) integer ids -> (..., H, W, C + num_agents). The actor built with agent_id_dim =
+    num_agents splits these channels off again before its CNN, so the id enters its dense layers, not the convolutions.
+    """
+    one_hot = jax.nn.one_hot(agent, num_agents, dtype=obs.dtype)
+    planes = jnp.broadcast_to(one_hot[..., None, None, :], (*obs.shape[:-1], num_agents))
+    return jnp.concatenate([obs, planes], axis=-1)
+
+
 class MixedActor(nn.Module):
     action_dim: int
     cnn_size: str = "small"
     fc_units: int = 64
     activation: str = "relu"
     cnn_layers: int = 1
+    agent_id_dim: int = 0  # [SADRL fix 2026-11-08] > 0: the last agent_id_dim input channels are the agent id (add_agent_id)
 
     @nn.compact
     def __call__(self, obs):
         activation = nn.relu if self.activation == "relu" else nn.tanh
+        if self.agent_id_dim:  # [SADRL fix 2026-11-08] round 16, A.1: id into the dense layers, after the CNN
+            agent_1h = obs[..., 0, 0, -self.agent_id_dim:]
+            obs = obs[..., :-self.agent_id_dim]
         x = MixedCNN(self.cnn_size, self.fc_units, self.activation, self.cnn_layers)(obs)
+        if self.agent_id_dim:
+            x = jnp.concatenate([x, agent_1h], axis=-1)
         x = activation(nn.Dense(self.fc_units, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x))
         logits = nn.Dense(self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0))(x)
         return distrax.Categorical(logits=logits)
@@ -428,6 +446,16 @@ def mappo_network_sizes(config):
     return cnn, fc
 
 
+def agent_id_dim(config):
+    """[SADRL fix 2026-11-08] Number of agent-id channels the actor expects: num_agents if AGENT_ID, else 0."""
+    if not config.get("AGENT_ID"):
+        return 0
+    n = config.get("ENV_KWARGS", {}).get("num_agents")
+    if not n:
+        raise ValueError("AGENT_ID needs ENV_KWARGS.num_agents")
+    return int(n)
+
+
 def mappo_networks(config):
     """Actor and critic constructors for MAPPO: callables with the Actor(action_dim, activation=...) and
     Critic(activation=...) signatures of the existing classes."""
@@ -438,6 +466,11 @@ def mappo_networks(config):
         raise ValueError(f"CNN_LAYERS must be >= 1, got {layers}")
     if layers > 1 and cnn != "small":
         raise ValueError("CNN_LAYERS > 1 is only defined for CNN_SIZE=small")
+    # [SADRL fix 2026-11-08] AGENT_ID (round 16, A.1): one-hot agent id into the actor's dense layers (MixedActor only;
+    # observations must carry it, see add_agent_id). The critic is unchanged (A.2: actor only).
+    id_dim = agent_id_dim(config)
+    if id_dim and ((layers == 1 and (cnn, fc) == ("small", "small")) or (cnn, fc) == ("full", "full")):
+        raise ValueError("AGENT_ID is only implemented for the mixed networks (e.g. CNN_SIZE=small FC_SIZE=full)")
     if layers == 1 and (cnn, fc) == ("small", "small"):
         return SmallActor, SmallCritic
     if (cnn, fc) == ("full", "full"):
@@ -445,7 +478,8 @@ def mappo_networks(config):
     units = 16 if fc == "small" else 64
 
     def actor(action_dim, activation="relu"):
-        return MixedActor(action_dim, cnn_size=cnn, fc_units=units, activation=activation, cnn_layers=layers)
+        return MixedActor(action_dim, cnn_size=cnn, fc_units=units, activation=activation, cnn_layers=layers,
+                          agent_id_dim=id_dim)
 
     def critic(activation="relu"):
         return MixedCritic(cnn_size=cnn, fc_units=units, activation=activation, cnn_layers=layers)

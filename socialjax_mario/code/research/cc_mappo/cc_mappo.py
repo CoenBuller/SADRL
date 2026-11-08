@@ -24,12 +24,13 @@ import wandb
 
 import socialjax
 from socialjax.wrappers.baselines import MAPPOWorldStateWrapper, SVOLogWrapper
-from algorithms.utils.networks import mappo_networks
+from algorithms.utils.networks import mappo_networks, add_agent_id, agent_id_dim  # round 16 A.1: AGENT_ID
 from algorithms.utils import batchify_dict, batchify_numpy, unbatchify
 from research.dual_critic.ippo_dual import _gae
 from research.cc_mappo.credit import CREDIT_MODES, CREDIT_NORMS, relative_others, baseline, credit, critic_prediction, normalise_credit
 from research.cc_mappo.credit import CREDIT_GATES, explained_variance, ev_smooth, gate_weight, gated_credit  # round 14 gate
-from research.cc_mappo.networks import CentralCreditCritic, LocalCreditCritic
+from research.cc_mappo.networks import CentralCreditCritic, LocalCreditCritic, MaskedCritic
+from algorithms.utils.networks import mappo_network_sizes
 
 CLEAN_ACTION, STAY_ACTION = 8, 6  # socialjax/environments/cleanup/clean_up.py Actions
 
@@ -58,7 +59,12 @@ def make_train(config):
     assert norm in CREDIT_NORMS, norm
     gate = config.get("CREDIT_GATE", "none")  # round 14 (B.2, B.4): "ev" mixes hat A and the credit by the credit critic's EV
     assert gate in CREDIT_GATES, gate
-    assert gate == "none" or mode in ("qret", "loo"), "the EV gate is a mixed baseline: only for G-based credits (qret, loo)"
+    assert gate == "none" or mode in ("qret", "loo", "loo_single"), "the EV gate is a mixed baseline: only for G-based credits"
+    # Round 16 (docs/cc_mappo_single_critic.md, C.2-C.4): loo_single replaces V_psi and the credit critic by one masked
+    # critic. All action slots masked -> V(s) (GAE, value clip as MAPPO); only agent i masked -> V(s, a^-i) (credit, no
+    # clip). Per sample row (agent i, env, step) both outputs are trained on G with VF_COEF * 1/2 each, so over the 7 rows
+    # of an env step the loss is 1/2 (V(s) - G)^2 + 1/2 mean_i (V(s, a^-i) - G)^2. One Adam, no target network.
+    single = mode == "loo_single"
     gate_beta, gate_efull = float(config.get("GATE_BETA", 0.9)), float(config.get("GATE_EFULL", 0.5))
     assert config["ENV_KWARGS"].get("shared_rewards", False), "CC-MAPPO is defined on the team reward"
     scale_keys = list(config.get("METRIC_SCALE_KEYS", []))
@@ -89,6 +95,16 @@ def make_train(config):
     def train(rng):
         actor_network = Actor(n_actions, activation=config["ACTIVATION"])
         critic_network = Critic(activation=config["ACTIVATION"])
+        if single:
+            cnn, fc = mappo_network_sizes(config)
+            critic_network = MaskedCritic(n_agents, n_actions, cnn_size=cnn, fc_units=16 if fc == "small" else 64,
+                                          cnn_layers=int(config.get("CNN_LAYERS") or 1), activation=config["ACTIVATION"])
+
+        def single_values(params, world_state, joint, agent):
+            """loo_single: (V(s), V(s, a^-i)) per row from one masked critic, one CNN pass."""
+            masks = jnp.stack([jnp.ones((agent.shape[0], n_agents)), jax.nn.one_hot(agent, n_agents)], axis=1)
+            out = critic_network.apply(params, world_state, joint, masks)
+            return out[:, 0], out[:, 1]
         if mode == "local":
             cc_network = LocalCreditCritic(n_agents, n_actions, activation=config["ACTIVATION"])
         else:
@@ -102,8 +118,12 @@ def make_train(config):
 
         rng, _ra, _rc, _rq = jax.random.split(rng, 4)
         ws_shape = (*obs_shape[:-1], obs_shape[-1] * n_agents)
-        actor_params = actor_network.init(_ra, jnp.zeros((1, *obs_shape)))
-        critic_params = critic_network.init(_rc, jnp.zeros((1, *ws_shape)))
+        id_dim = agent_id_dim(config)  # round 16, A.1: one-hot agent id into the actor only (0 = off, unchanged)
+        actor_in = (lambda o, a: add_agent_id(o, a, id_dim)) if id_dim else (lambda o, a: o)
+        actor_params = actor_network.init(_ra, actor_in(jnp.zeros((1, *obs_shape)), jnp.zeros((1,), jnp.int32)))
+        critic_params = (critic_network.init(_rc, jnp.zeros((1, *ws_shape)), jnp.zeros((1, n_agents), jnp.int32),
+                                             jnp.zeros((1, 2, n_agents))) if single
+                         else critic_network.init(_rc, jnp.zeros((1, *ws_shape))))
         cc_params = cc_network.init(_rq, *(
             (jnp.zeros((1, *obs_shape)), jnp.zeros((1,)), jnp.zeros((1,), jnp.int32)) if mode == "local" else
             (jnp.zeros((1, *ws_shape)), jnp.zeros((1, n_agents - 1), jnp.int32), jnp.zeros((1,), jnp.int32))))
@@ -112,6 +132,8 @@ def make_train(config):
         actor_state = TrainState.create(apply_fn=actor_network.apply, params=actor_params, tx=make_tx())
         critic_state = TrainState.create(apply_fn=critic_network.apply, params=critic_params, tx=make_tx())
         cc_state = TrainState.create(apply_fn=cc_network.apply, params=cc_params, tx=make_tx())
+        if single:  # the credit critic slot is kept for the runner_state layout, never used or updated
+            cc_state = critic_state
 
         rng, _rng = jax.random.split(rng)
         obsv, env_state = jax.vmap(env.reset)(jax.random.split(_rng, config["NUM_ENVS"]))
@@ -124,16 +146,20 @@ def make_train(config):
                 actor_state, critic_state, cc_state = train_states
                 rng, _rng = jax.random.split(rng)
                 obs_batch = jnp.transpose(last_obs, (1, 0, 2, 3, 4)).reshape(-1, *obs_shape)
-                pi = actor_network.apply(actor_state.params, obs_batch)
+                pi = actor_network.apply(actor_state.params, actor_in(obs_batch, agent_id))
                 action = pi.sample(seed=_rng)
                 log_prob = pi.log_prob(action)
                 env_act = [v for v in unbatchify(action, env.agents, config["NUM_ENVS"], n_agents).values()]
 
                 ws_env = env_world_states(last_obs)
                 ws = jnp.tile(ws_env[None], (n_agents, 1, 1, 1, 1)).reshape(-1, *ws_shape)
-                value = critic_network.apply(critic_state.params, ws).reshape(config["NUM_ACTORS"])
                 joint_env = action.reshape(n_agents, config["NUM_ENVS"]).T  # (NUM_ENVS, N)
-                cq = cc_apply(cc_state.params, obs_batch, ws, joint_env[env_id], agent_id, value)
+                if single:
+                    value, v_minus = single_values(critic_state.params, ws, joint_env[env_id], agent_id)
+                    cq = v_minus[:, None]
+                else:
+                    value = critic_network.apply(critic_state.params, ws).reshape(config["NUM_ACTORS"])
+                    cq = cc_apply(cc_state.params, obs_batch, ws, joint_env[env_id], agent_id, value)
 
                 rng, _rng = jax.random.split(rng)
                 obsv, env_state, reward, done, info = jax.vmap(env.step)(
@@ -155,7 +181,11 @@ def make_train(config):
             train_states, env_state, last_obs, last_done, rng = runner_state
 
             last_ws = jnp.tile(env_world_states(last_obs)[None], (n_agents, 1, 1, 1, 1)).reshape(-1, *ws_shape)
-            last_val = critic_network.apply(train_states[1].params, last_ws).reshape(config["NUM_ACTORS"])
+            if single:  # all slots masked: the actions don't enter
+                last_val = single_values(train_states[1].params, last_ws, jnp.zeros((config["NUM_ACTORS"], n_agents), jnp.int32),
+                                         agent_id)[0]
+            else:
+                last_val = critic_network.apply(train_states[1].params, last_ws).reshape(config["NUM_ACTORS"])
             advantages, targets = _gae(traj.done, traj.value, traj.reward, last_val, config["GAMMA"], config["GAE_LAMBDA"])
             credits = credit(mode, traj.cq, traj.probs, traj.action, targets)
             if gate == "ev":  # round 14: w = 0 (plain MAPPO) until the credit critic explains the return, then the credit
@@ -171,7 +201,7 @@ def make_train(config):
                     traj, advantages, targets, credits = batch
 
                     def _actor_loss_fn(params):
-                        pi = actor_network.apply(params, traj.obs)
+                        pi = actor_network.apply(params, actor_in(traj.obs, traj.agent_id))
                         log_prob = pi.log_prob(traj.action)
                         gae = normalise_credit(credits, advantages, norm)
                         ratio = jnp.exp(log_prob - traj.log_prob)
@@ -195,12 +225,26 @@ def make_train(config):
                         target = advantages if mode == "local" else targets
                         return config["VF_COEF"] * 0.5 * jnp.square(critic_prediction(mode, q, traj.action) - target).mean()
 
+                    def _single_loss_fn(params):
+                        value, v_minus = single_values(params, jnp.take(ws_buffer, traj.world_state, axis=0),
+                                                       jnp.take(joint_buffer, traj.world_state, axis=0), traj.agent_id)
+                        v_clip = traj.value + (value - traj.value).clip(-config["CLIP_EPS"], config["CLIP_EPS"])
+                        v_loss = config["VF_COEF"] * 0.5 * jnp.maximum(
+                            jnp.square(value - targets), jnp.square(v_clip - targets)).mean()
+                        q_loss = config["VF_COEF"] * 0.5 * jnp.square(v_minus - targets).mean()
+                        return v_loss + q_loss, (v_loss, q_loss)
+
                     (a_loss, (entropy, approx_kl, clip_frac)), a_grads = jax.value_and_grad(_actor_loss_fn, has_aux=True)(actor_state.params)
-                    c_loss, c_grads = jax.value_and_grad(_critic_loss_fn)(critic_state.params)
-                    q_loss, q_grads = jax.value_and_grad(_cc_loss_fn)(cc_state.params)
-                    train_states = (actor_state.apply_gradients(grads=a_grads),
-                                    critic_state.apply_gradients(grads=c_grads),
-                                    cc_state.apply_gradients(grads=q_grads))
+                    if single:
+                        (_, (c_loss, q_loss)), c_grads = jax.value_and_grad(_single_loss_fn, has_aux=True)(critic_state.params)
+                        train_states = (actor_state.apply_gradients(grads=a_grads),
+                                        critic_state.apply_gradients(grads=c_grads), cc_state)
+                    else:
+                        c_loss, c_grads = jax.value_and_grad(_critic_loss_fn)(critic_state.params)
+                        q_loss, q_grads = jax.value_and_grad(_cc_loss_fn)(cc_state.params)
+                        train_states = (actor_state.apply_gradients(grads=a_grads),
+                                        critic_state.apply_gradients(grads=c_grads),
+                                        cc_state.apply_gradients(grads=q_grads))
                     return train_states, {"actor_loss": a_loss, "value_loss": c_loss, "credit_critic_loss": q_loss,
                                           "entropy": entropy, "approx_kl": approx_kl, "clip_frac": clip_frac}
 
@@ -261,6 +305,8 @@ def make_train(config):
             cc_target = advantages if mode == "local" else targets
             pred = critic_prediction(mode, traj.cq, traj.action)
             m["credit_critic_explained_var"] = 1.0 - jnp.var(cc_target - pred) / (jnp.var(cc_target) + 1e-8)
+            # round 16: V(s)'s explained variance on G, comparable with MAPPO's critic_explained_var (all modes)
+            m["critic_explained_var"] = 1.0 - jnp.var(targets - traj.value) / (jnp.var(targets) + 1e-8)
             per_episode = config["ENV_KWARGS"]["num_inner_steps"] / T
             rew = traj.agent_reward.reshape(T, n_agents, E).sum(0).mean(-1) * per_episode
             cln = (traj.action == CLEAN_ACTION).reshape(T, n_agents, E).sum(0).mean(-1) * per_episode

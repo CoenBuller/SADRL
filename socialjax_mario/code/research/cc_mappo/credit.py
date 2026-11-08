@@ -5,7 +5,7 @@ and the others' actions; for CC-local it is U), probs = pi_old(.|o^i), a = the a
 """
 import jax.numpy as jnp
 
-CREDIT_MODES = ("coma", "qret", "loo", "local")
+CREDIT_MODES = ("coma", "qret", "loo", "local", "loo_single")  # loo_single: round 16, one masked critic
 
 
 def relative_others(joint_actions, agent):
@@ -30,14 +30,14 @@ def credit(mode, q, probs, a, G):
         return taken(q, a) - baseline(q, probs)
     if mode == "qret":
         return G - baseline(q, probs)
-    if mode == "loo":
+    if mode in ("loo", "loo_single"):
         return G - q[..., 0]
     raise ValueError(mode)
 
 
 def critic_prediction(mode, q, a):
     """What the credit critic regresses on its target: Q[a^i] (coma, qret), V(s, a^-i) (loo) or U[a^i] (local)."""
-    return q[..., 0] if mode == "loo" else taken(q, a)
+    return q[..., 0] if mode in ("loo", "loo_single") else taken(q, a)
 
 
 CREDIT_NORMS = ("team", "self")

@@ -29,8 +29,8 @@ The settings of every real run are in the batch scripts under `code/slurm/batch_
 
 | Path | What it is |
 |---|---|
-| `code/research/cc_mappo/` | Counterfactual-credit MAPPO: credit modes (`credit.py`: coma, qret, loo, local, the explained-variance gate), networks, training loop |
-| `code/algorithms/MAPPO/mappo_cnn_cleanup.py` | MAPPO on Clean Up with our fixes (world state stored once per step), network options (`CNN_SIZE`, `FC_SIZE`, `CNN_LAYERS`) and diagnostics |
+| `code/research/cc_mappo/` | Counterfactual-credit MAPPO: credit modes (`credit.py`: coma, qret, loo, local, the explained-variance gate; `loo_single` = loo with one masked critic, `MaskedCritic` in `networks.py`), training loop |
+| `code/algorithms/MAPPO/mappo_cnn_cleanup.py` | MAPPO on Clean Up with our fixes (world state stored once per step), network options (`CNN_SIZE`, `FC_SIZE`, `CNN_LAYERS`, `AGENT_ID` = one-hot agent id in the actor), diagnostics |
 | `code/algorithms/MAPPO/mappo_cnn_cc_cleanup.py` | Entry point for CC-MAPPO on Clean Up (`--env cc_cleanup`) |
 | `code/research/dual_critic/` | IPPO/MAPPO with a team critic and an individual critic |
 | `code/research/mappo_grid/` | Run summaries, plots and the per-agent evaluation of saved actors |
@@ -52,7 +52,8 @@ agent. Upstream fixed it on 25 Sep 2026 (`fb4ac0f`). Here it is an environment o
 
 | Folder | What it is |
 |---|---|
-| `results/2026-11-06_round13/` | **Latest.** CNN depth, CC-MAPPO (qret, loo) against MAPPO, the rollout 2 × 2, and why CC-MAPPO sometimes never learns |
+| `results/2026-11-08_round15/` | **Latest.** Fixed environment: almost every run (MAPPO, CC loo, CC loo + gate) stops near 900 with no second cleaner; the swap evaluation shows what an agent sees of itself decides who cleans; EV gate; update study at 3e8 |
+| `results/2026-11-06_round13/` | CNN depth, CC-MAPPO (qret, loo) against MAPPO, the rollout 2 × 2, and why CC-MAPPO sometimes never learns |
 | `results/2026-11-05_eval_agents/` | Per-agent evaluation of the saved actors: is there a lazy agent? (No.) |
 | `results/2026-11-03_mappo_grid/` | MAPPO network (CNN / FC size) × rollout (4 × 100, 32 × 1000) grid |
 | `results/gifs/` | One end-of-training episode per setting (seed 31) |

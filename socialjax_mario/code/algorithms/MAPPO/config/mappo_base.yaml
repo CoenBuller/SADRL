@@ -22,6 +22,7 @@
 "CNN_SIZE": null  # [SADRL fix 2026-11-03] small | full, overrides NETWORK_SIZE for the conv layers (Clean Up script only)
 "FC_SIZE": null  # [SADRL fix 2026-11-03] small | full, overrides NETWORK_SIZE for both dense layers
 "CNN_LAYERS": null  # [SADRL fix 2026-11-05] number of 16 @ 3x3 conv layers in the small CNN (unset = 1, unchanged)
+"AGENT_ID": False  # [SADRL fix 2026-11-08] one-hot agent id into the actor's dense layers (round 16, A.1); mixed networks only
 
 # Reward shaping
 "REW_SHAPING_HORIZON": 2.5e6

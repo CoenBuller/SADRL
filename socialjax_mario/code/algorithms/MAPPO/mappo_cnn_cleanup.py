@@ -23,6 +23,8 @@ from algorithms.utils import (
     Actor as FullActor,  # [SADRL fix 2026-10-20] NETWORK_SIZE=full: IPPO's CNN torso for the actor and the critic
     Critic as FullCritic,
     mappo_networks,  # [SADRL fix 2026-11-03] CNN_SIZE x FC_SIZE grid (round 10)
+    add_agent_id,  # [SADRL fix 2026-11-08] AGENT_ID (round 16, A.1)
+    agent_id_dim,  # [SADRL fix 2026-11-08]
     batchify_dict,
     batchify_numpy,
     unbatchify,
@@ -90,6 +92,9 @@ def make_train(config):
         rng, _rng_actor, _rng_critic = jax.random.split(rng, 3)
         ac_init_x = jnp.zeros((1, *(env.observation_space()[0]).shape))
             
+        id_dim = agent_id_dim(config)  # [SADRL fix 2026-11-08] AGENT_ID (round 16, A.1): 0 = off, unchanged
+        if id_dim:
+            ac_init_x = add_agent_id(ac_init_x, jnp.zeros((1,), jnp.int32), id_dim)
         actor_network_params = actor_network.init(_rng_actor, ac_init_x)
 
         obs_shape = env.observation_space()[0].shape
@@ -146,6 +151,8 @@ def make_train(config):
                 obs_batch = jnp.transpose(last_obs,(1,0,2,3,4)).reshape(-1, *(env.observation_space()[0]).shape)
                 # obs_batch = jnp.stack([last_obs[a] for a in env.agents]).reshape(-1, *env.observation_space().shape)
 
+                if id_dim:  # [SADRL fix 2026-11-08] actors are agent-major: actor k is agent k // NUM_ENVS
+                    obs_batch = add_agent_id(obs_batch, jnp.arange(config["NUM_ACTORS"]) // config["NUM_ENVS"], id_dim)
                 pi = actor_network.apply(train_states[0].params, obs_batch)
                 action = pi.sample(seed=_rng)
                 log_prob = pi.log_prob(action)

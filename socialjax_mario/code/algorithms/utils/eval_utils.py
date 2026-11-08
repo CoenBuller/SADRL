@@ -17,6 +17,7 @@ import wandb
 
 from algorithms.utils.networks import ActorCritic, SmallActor, Actor  # [SADRL fix 2026-10-20] Actor for NETWORK_SIZE=full
 from algorithms.utils.networks import mappo_networks  # [SADRL fix 2026-11-03] CNN_SIZE x FC_SIZE
+from algorithms.utils.networks import add_agent_id, agent_id_dim  # [SADRL fix 2026-11-08] AGENT_ID (round 16, A.1)
 from algorithms.utils.data_utils import unbatchify
 
 
@@ -171,6 +172,8 @@ def evaluate_mappo_style(params, env, save_path, config, use_actor_only=True):
             # actor_cls = Actor if config.get("NETWORK_SIZE", "small") == "full" else SmallActor  # [SADRL fix 2026-10-20]
             actor_cls = mappo_networks(config)[0]  # [SADRL fix 2026-11-03] same actor variant as in training
             network = actor_cls(action_dim=env.action_space().n, activation=config.get("ACTIVATION", "relu"))
+            if agent_id_dim(config):  # [SADRL fix 2026-11-08] one env here: row k is agent k
+                obs_batch = add_agent_id(obs_batch, jnp.arange(env.num_agents), agent_id_dim(config))
             pi = network.apply(params, obs_batch)
         else:
             network = ActorCritic(action_dim=env.action_space().n, activation=config.get("ACTIVATION", "relu"))
