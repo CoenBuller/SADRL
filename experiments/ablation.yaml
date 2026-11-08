@@ -1,0 +1,31 @@
+ENV_NAME: "gift"
+N_AGENTS: 5
+N_ENVS: 100
+TOTAL_TIMESTEPS: int(1e8)
+NUM_STEPS: 100
+SEED: 30
+
+# Storage
+WANDB: True
+GIF_FRAMES: 1000
+OUT_DIR: "results"
+
+# Algorithm
+ALGO: str = "RecurrentCOMA"
+SMALL: bool = True     # Use the small actor criti or not.
+HIDDEN_DIM: int = 32
+
+# Optimization loop
+UPDATE_EPOCHS: 10
+NUM_MINIBATCHES: 10000
+
+# Optimizer
+MAX_GRAD_NORM: float = 0.5
+LR: float = 1e-4
+
+# Advantage & Loss
+GAMMA: float = 0.99
+GAE_LAMBDA: float = 0.95
+CLIP_EPS: float = 0.2
+VF_COEF: float = 0.5 
+ENT_COEF: float = 0.03
