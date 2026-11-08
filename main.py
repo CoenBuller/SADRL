@@ -10,8 +10,8 @@ from flax.serialization import to_bytes
 
 # Adjust imports based on your project structure
 from src.config import Config
-from train_IPPO import make_train_IPPO
-from train_recurrentMAPPO import make_train_MAPPO  # Updated to the new recurrent file
+from src.train_IPPO import make_train_IPPO
+from src.train_recurrentMAPPO import make_train_MAPPO  # Updated to the new recurrent file
 from src.algorithms.evaluate import make_gif
 
 def main():
