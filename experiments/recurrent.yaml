@@ -1,0 +1,36 @@
+# Environment (Mario's Clean Up setup)
+ENV_NAME: "clean_up"
+N_AGENTS: 7
+N_ENVS: 4
+TOTAL_TIMESTEPS: 100000000
+NUM_STEPS: 100
+SEED: 30
+
+# Storage
+WANDB: true
+GIF_FRAMES: 1000
+OUT_DIR: "results"
+
+# Algorithm & Architecture (SmallCNN + 64 FC)
+ALGO: "RecurrentMAPPO"
+COMMON_REWARD: true
+REPUTATION: false
+SMALL: true
+HIDDEN_DIM: 64
+ACTIVATION: "relu"
+
+# Optimization loop (4 * 7 * 100 = 2800 samples / 4 minibatches = 700 samples/minibatch)
+UPDATE_EPOCHS: 4
+NUM_MINIBATCHES: 4
+
+# Optimizer
+MAX_GRAD_NORM: 0.5
+ANNEAL_LR: true
+LR: 0.0003
+
+# Advantage & Loss
+GAMMA: 0.99
+GAE_LAMBDA: 0.95
+CLIP_EPS: 0.2
+VF_COEF: 0.5
+ENT_COEF: 0.01
