@@ -5,24 +5,23 @@ import wandb
 
 from typing import Any, NamedTuple
 from flax.training.train_state import TrainState
-import flax.linen as nn
 
 from src.networks.networks2 import RecurrentMAPPOAC, LSTM, MAPPOResult
 from src.environments.env_wrapper import Environment
 
 
 class Transition(NamedTuple):
-    done: jnp.ndarray                                         # (batch_size,)
-    action: jnp.ndarray                                       # (batch_size,)
-    last_action: jnp.ndarray                                  # (batch_size,)
-    value: jnp.ndarray                                        # (batch_size,) -> Baseline V_t = sum_a pi(a^i)Q(S_t, (a^i, a_t^{-i}))
-    q_taken: jnp.ndarray                                      # (batch_size,) -> Q(S_t, (a_t^i, a_t^{-i}))
-    reward: jnp.ndarray                                       # (batch_size,)
-    log_prob: jnp.ndarray                                     # (batch_size,)
-    actor_obs: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]   # (obs_batch, dones_batch, last_action_batch)
-    critic_obs: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]  # (world_batch, agent_id_oh, current_joint_actions)
-    true_xy: jnp.ndarray                                      # (batch_size, 2) normalized in [0, 1]^2
-    reputation: jnp.ndarray                                   # (batch_size,)
+    done: jnp.ndarray                                                       # (batch_size,)
+    action: jnp.ndarray                                                     # (batch_size,)
+    last_action: jnp.ndarray                                                # (batch_size,)
+    value: jnp.ndarray                                                      # (batch_size,)
+    q_taken: jnp.ndarray                                                    # (batch_size,)
+    reward: jnp.ndarray                                                     # (batch_size,)
+    log_prob: jnp.ndarray                                                   # (batch_size,)
+    actor_obs: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]                 # (obs_batch, dones_batch, last_action_batch)
+    critic_obs: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]   # (global_map, global_agent_vec, agent_id_oh, current_joint_actions)
+    true_xy: jnp.ndarray                                                    # (batch_size, 2)
+    reputation: jnp.ndarray                                                 # (batch_size,)
     info: Any
 
 
@@ -54,7 +53,7 @@ def make_train_recurrent_COMA(config):
             num_agents=num_agents,
             hidden_dim=config["HIDDEN_DIM"],
             activation=config["ACTIVATION"],
-            small=True,
+            small=config["SMALL"],
         )
 
         rng, _rng = jax.random.split(rng)
@@ -70,12 +69,14 @@ def make_train_recurrent_COMA(config):
         )
 
         init_global_map, init_agent_vec = env.reconstruct_critic_state(env_state)
+        agent_id_oh_template = jnp.repeat(
+            jnp.eye(num_agents)[None, :, :], num_envs, axis=0
+        ).reshape((batch_size, num_agents))
+
         init_critic_obs = (
             init_global_map,
             init_agent_vec,
-            jnp.repeat(jnp.eye(num_agents)[None, :, :], num_envs, axis=0).reshape(
-                (batch_size, num_agents)
-            ),
+            agent_id_oh_template,
             jnp.zeros((batch_size, num_agents), dtype=jnp.int32),
         )
 
@@ -133,10 +134,6 @@ def make_train_recurrent_COMA(config):
             dones_batch = last_done.reshape((batch_size,)).astype(jnp.float32)
             last_action_batch = last_action.reshape((batch_size,))
 
-            agent_id_oh = jnp.repeat(
-                jnp.eye(num_agents)[None, :, :], num_envs, axis=0
-            ).reshape((batch_size, num_agents))
-
             # Step 4a: Run Actor first to sample current actions a_t
             actor_obs = (obs_batch, dones_batch, last_action_batch)
             actor_obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], actor_obs)
@@ -148,22 +145,24 @@ def make_train_recurrent_COMA(config):
                 method=network.forward_actor,
             )  # type: ignore
 
-            action_seq = pi.sample(seed=_rng_action)                               # type: ignore
-            action = action_seq.squeeze(0)                        # (batch_size,)
-            log_prob = pi.log_prob(action_seq).squeeze(0)         # (batch_size,)# type: ignore
-            probs = pi.probs.squeeze(0)                           # (batch_size, action_dim)# type: ignore
+            action_seq = pi.sample(seed=_rng_action)               # type: ignore
+            action = action_seq.squeeze(0)                         # (batch_size,)
+            log_prob = pi.log_prob(action_seq).squeeze(0)          # type: ignore
+            probs = pi.probs.squeeze(0)                            # type: ignore
 
-            # Form current joint action vector A_t = (a_t^1, ..., a_t^N) for each environment
             actions_per_env = action.reshape((num_envs, num_agents))
             current_joint_actions = jnp.repeat(
                 actions_per_env[:, None, :], num_agents, axis=1
             ).reshape((batch_size, num_agents))
 
             # Step 4b: Run COMA Critic conditioned on S_t and current joint actions A_t
-            # (CounterFactualCritic internally masks out agent i's own action to get a_t^{-i})
-
             global_map, global_agent_vec = env.reconstruct_critic_state(env_state)
-            critic_obs = (global_map, global_agent_vec, agent_id_oh, current_joint_actions)
+            critic_obs = (
+                global_map,
+                global_agent_vec,
+                agent_id_oh_template,
+                current_joint_actions,
+            )
             critic_obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], critic_obs)
 
             q_vals_seq = network.apply(
@@ -171,15 +170,12 @@ def make_train_recurrent_COMA(config):
                 critic_obs_t,
                 method=network.forward_critic,
             )  # type: ignore
-            q_vals = q_vals_seq.squeeze(0)                        # (batch_size, action_dim) # type: ignore
+            q_vals = q_vals_seq.squeeze(0)                         # type: ignore
 
-            # Counterfactual Baseline V(S_t, a_t^{-i}) = sum_{a^i} pi(a^i | h_t^i) * Q(S_t, (a^i, a_t^{-i}))
-            value = (probs * q_vals).sum(axis=-1)                 # (batch_size,)
-
-            # Q-value of the specific action taken: Q(S_t, (a_taken^i, a_t^{-i}))
+            value = (probs * q_vals).sum(axis=-1)
             q_taken = jnp.take_along_axis(
                 q_vals, action[:, None], axis=-1
-            ).squeeze(-1)                                         # (batch_size,)
+            ).squeeze(-1)
 
             next_obs, (next_env_state, next_rep), reward, done, info = env.step(
                 _rng_step, actions_per_env, (env_state, rep)
@@ -199,7 +195,7 @@ def make_train_recurrent_COMA(config):
                 reward=reward_flat,
                 log_prob=log_prob,
                 actor_obs=actor_obs,
-                critic_obs=critic_obs, # type: ignore
+                critic_obs=critic_obs,
                 true_xy=true_xy,
                 reputation=rep.reshape((batch_size,)),
                 info=info,
@@ -242,7 +238,6 @@ def make_train_recurrent_COMA(config):
             rng, _rng_boot = jax.random.split(rng)
 
             last_obs_batch = last_obs.reshape((batch_size, *last_obs.shape[2:]))  # type: ignore
-            agent_id_oh = jnp.repeat(jnp.eye(num_agents)[None, :, :], num_envs, axis=0).reshape((batch_size, num_agents))
 
             actor_obs = (
                 last_obs_batch,
@@ -251,19 +246,26 @@ def make_train_recurrent_COMA(config):
             )
             actor_obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], actor_obs)
 
-            _, pi_last, _ = network.apply(# type: ignore
+            _, pi_last, _ = network.apply( # type: ignore
                 agent_state.params,
                 hidden,
                 actor_obs_t,
                 method=network.forward_actor,
             )  # type: ignore
 
-            boot_action = pi_last.sample(seed=_rng_boot).squeeze(0)# type: ignore
+            boot_action = pi_last.sample(seed=_rng_boot).squeeze(0)  # type: ignore
             boot_actions_per_env = boot_action.reshape((num_envs, num_agents))
-            boot_joint_actions = jnp.repeat(boot_actions_per_env[:, None, :], num_agents, axis=1).reshape((batch_size, num_agents))
+            boot_joint_actions = jnp.repeat(
+                boot_actions_per_env[:, None, :], num_agents, axis=1
+            ).reshape((batch_size, num_agents))
 
             last_global_map, last_agent_vec = env.reconstruct_critic_state(env_state)
-            critic_obs = (last_global_map, last_agent_vec, agent_id_oh, boot_joint_actions)
+            critic_obs = (
+                last_global_map,
+                last_agent_vec,
+                agent_id_oh_template,
+                boot_joint_actions,
+            )
             critic_obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], critic_obs)
 
             q_last = network.apply(
@@ -272,7 +274,7 @@ def make_train_recurrent_COMA(config):
                 method=network.forward_critic,
             ).squeeze(0)  # type: ignore
 
-            last_val = (pi_last.probs.squeeze(0) * q_last).sum(axis=-1)# type: ignore
+            last_val = (pi_last.probs.squeeze(0) * q_last).sum(axis=-1)  # type: ignore
 
             def _calculate_gae(traj_batch, last_val):
                 def _get_advantages(gae_and_next_value, transition):
@@ -315,8 +317,6 @@ def make_train_recurrent_COMA(config):
                             mb_size, config["HIDDEN_DIM"]
                         )
 
-                        # Both actor_obs and critic_obs (containing current_joint_actions)
-                        # are already stored in traj_batch, so we run the full network in one pass
                         out: MAPPOResult = network.apply(
                             params,
                             init_hidden_mb,
@@ -327,8 +327,7 @@ def make_train_recurrent_COMA(config):
                         pi = out.pi
                         log_prob = pi.log_prob(traj_batch.action)
 
-                        # 1. Exact COMA Counterfactual Advantage:
-                        # A_cf^i = Q(S_t, (a_taken^i, a_t^{-i})) - sum_{a'} pi(a' | h_t^i) * Q(S_t, (a', a_t^{-i}))
+                        # 1. Unnormalized Direct COMA Counterfactual Advantage
                         q_taken_pred = jnp.take_along_axis(
                             out.q_all_actions,
                             traj_batch.action[:, :, None],
@@ -339,7 +338,6 @@ def make_train_recurrent_COMA(config):
                         ).sum(axis=-1)
 
                         adv_cf = jax.lax.stop_gradient(q_taken_pred - value_pred)
-                        adv_cf = (adv_cf - adv_cf.mean()) / (adv_cf.std() + 1e-8)
 
                         # Clipped Policy Objective
                         ratio = jnp.exp(log_prob - traj_batch.log_prob)
@@ -354,17 +352,10 @@ def make_train_recurrent_COMA(config):
                         )
                         loss_actor = -jnp.minimum(loss_actor1, loss_actor2).mean()
 
-                        # 2. Critic Q-Value Loss (Clipped TD-target supervision on Q(S_t, A_t))
-                        q_pred_clipped = traj_batch.q_taken + (
-                            q_taken_pred - traj_batch.q_taken
-                        ).clip(-config["CLIP_EPS"], config["CLIP_EPS"])
-                        q_losses = jnp.square(q_taken_pred - targets)
-                        q_losses_clipped = jnp.square(q_pred_clipped - targets)
-                        loss_critic = (
-                            0.5 * jnp.maximum(q_losses, q_losses_clipped).mean()
-                        )
+                        # 2. Unclipped MSE Critic Loss
+                        loss_critic = 0.5 * jnp.square(q_taken_pred - targets).mean()
 
-                        # 3. Self-Localization Loss (MSE against ground-truth normalized xy)
+                        # 3. Self-Localization Loss
                         loss_loc = jnp.square(
                             out.pred_xy - traj_batch.true_xy
                         ).mean()
