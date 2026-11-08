@@ -20,7 +20,7 @@ class Config:
     REP_DECAY: float = 0.95
 
     # Algorithm
-    ALGO: str = "Recurrent COMA"
+    ALGO: str = "RecurrentCOMA"
     COMMON_REWARD: bool = True
     ACTIVATION: str = "relu"
     REPUTATION: bool = False

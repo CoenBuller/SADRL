@@ -1,13 +1,12 @@
 # Environment
 ENV_NAME: str = "cleanup"
 N_AGENTS: int = 5
-N_ENVS: int = 32
+N_ENVS: int = 10
 NUM_STEPS: int = 100
 SEED: int = 30
 
-
 # Algorithm
-ALGO: str = "Recurrent COMA"
+ALGO: str = "RecurrentCOMA"
 
 NUM_MINIBATCHES: int = 50
 

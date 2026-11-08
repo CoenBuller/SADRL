@@ -6,7 +6,7 @@ import wandb
 from typing import NamedTuple
 from flax.training.train_state import TrainState
 
-from src.algorithms.networks import ActorCritic
+from src.networks.networks import ActorCritic
 from src.environments.env_wrapper import Environment
 
 class Transition(NamedTuple):
