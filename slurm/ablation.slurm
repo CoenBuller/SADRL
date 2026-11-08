@@ -4,8 +4,8 @@
 #SBATCH --error=slurm_logs/%x_%A_%a.err
 #SBATCH --partition=gpu-short
 #SBATCH --gres=gpu:a100:1
-#SBATCH --time=12:00:00
-#SBATCH --mem=32G
+#SBATCH --time=4:00:00
+#SBATCH --mem=40G
 #SBATCH --array=0-7
 
 # Exit immediately if a command exits with a non-zero status
@@ -50,7 +50,7 @@ echo "  Seed:        $SEED"
 echo "=================================================="
 
 # Run the training script with the YAML config and CLI overrides
-python main.py --config experiment_coma.yaml --algo $ALGO --env clean_up --seed $SEED
+python main.py --config experiments/ablation.yaml --algo $ALGO --env clean_up --seed $SEED
 
 echo "=================================================="
 echo "Task completed successfully!"

@@ -1,0 +1,16 @@
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /home/s2631415/.netrc.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: setting up run lif0llyu
+wandb: Tracking run with wandb version 0.27.2
+wandb: Run data is saved locally in /zfsstore/user/s2631415/SADRL/wandb/run-20261108_203054-lif0llyu
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run MAPPO_clean_up_30_rep_False
+wandb: ⭐️ View project at https://wandb.ai/coen-sadrl/sadrl
+wandb: 🚀 View run at https://wandb.ai/coen-sadrl/sadrl/runs/lif0llyu
+Traceback (most recent call last):
+  File "/zfsstore/user/s2631415/SADRL/main.py", line 128, in <module>
+    main()
+  File "/zfsstore/user/s2631415/SADRL/main.py", line 82, in main
+    train_fn = make_train_basic_MAPPO(config_dict)
+               ^^^^^^^^^^^^^^^^^^^^^^
+NameError: name 'make_train_basic_MAPPO' is not defined

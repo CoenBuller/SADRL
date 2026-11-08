@@ -1,14 +1,17 @@
 # Environment
-ENV_NAME: str = "cleanup"
-N_AGENTS: int = 5
-N_ENVS: int = 10
-NUM_STEPS: int = 100
-SEED: int = 30
+ENV_NAME: "clean_up"
+N_ENVS: 30
+NUM_STEPS: 100
+SEED: 30
 
 # Algorithm
-ALGO: str = "RecurrentCOMA"
+ALGO: "RecurrentCOMA"
 
-NUM_MINIBATCHES: int = 50
+# Batching: N_ENVS * N_AGENTS = 50 items. 
+# NUM_MINIBATCHES = 50 means 1 trajectory sequence per minibatch.
+NUM_MINIBATCHES: 150
+UPDATE_EPOCHS: 4
 
-LR: float = 3e-4
-ENT_COEF: float = 0.05
+LR: 0.0003
+ENT_COEF: 0.05
+

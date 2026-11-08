@@ -1,0 +1,38 @@
+# smoke_test.yaml
+# Minimal settings to verify JIT compilation, BPTT dimensions, and gradient updates
+
+# Algorithm & Model
+ALGO: "RecurrentMAPPO"
+SMALL: true
+HIDDEN_DIM: 16
+
+# Environment
+ENV_NAME: "gift"
+N_AGENTS: 5
+N_ENVS: 4
+SEED: 42
+COMMON_REWARD: true
+REPUTATION: false
+
+# Trajectory & Mini-batch sizes
+# Keep NUM_STEPS * N_ENVS * N_AGENTS divisible by NUM_MINIBATCHES
+# 10 steps * 4 envs * 5 agents = 200 total transition slices
+NUM_STEPS: 10
+NUM_MINIBATCHES: 2
+UPDATE_EPOCHS: 1
+TOTAL_TIMESTEPS: 80    # 2 update cycles (80 // (10 * 4) = 2)
+
+# Logging & Storage
+WANDB: false
+OUT_DIR: "results_smoke_test"
+GIF_FRAMES: 0
+
+# Optimizer & Loss Hyperparameters
+LR: 0.0003
+ANNEAL_LR: false
+MAX_GRAD_NORM: 0.5
+GAMMA: 0.99
+GAE_LAMBDA: 0.95
+CLIP_EPS: 0.2
+VF_COEF: 0.5
+ENT_COEF: 0.01
