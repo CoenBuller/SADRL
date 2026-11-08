@@ -9,10 +9,13 @@ from pathlib import Path
 from flax.serialization import to_bytes
 
 # Adjust imports based on your project structure
+from src.evaluate import make_gif
 from src.config import Config
-from algorithms.IPPO import make_train_IPPO
-from algorithms.RecurrentCOMA import make_train_MAPPO  # Updated to the new recurrent file
-from src.algorithms.evaluate import make_gif
+from src.algorithms.IPPO import make_train_IPPO
+from src.algorithms.MAPPO import make_train_MAPPO
+from src.algorithms.RecurrentMAPPO import make_train_recurrent
+from src.algorithms.COMA import make_train_COMA
+from src.algorithms.RecurrentCOMA import make_train_recurrent_COMA
 
 def main():
     p = argparse.ArgumentParser(description="Run MARL Training")

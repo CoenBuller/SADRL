@@ -7,7 +7,7 @@ from typing import Any, NamedTuple
 from flax.training.train_state import TrainState
 import flax.linen as nn
 
-from src.networks.networks import RecurrentMAPPOAC, LSTM, MAPPOResult
+from src.networks.networks2 import RecurrentMAPPOAC, LSTM, MAPPOResult
 from src.environments.env_wrapper import Environment
 
 
@@ -26,7 +26,7 @@ class Transition(NamedTuple):
     info: Any
 
 
-def make_train_MAPPO(config):
+def make_train_recurrent_COMA(config):
     env = Environment(
         common_reward=config["COMMON_REWARD"],
         env_name=config["ENV_NAME"],
@@ -199,7 +199,7 @@ def make_train_MAPPO(config):
                 reward=reward_flat,
                 log_prob=log_prob,
                 actor_obs=actor_obs,
-                critic_obs=critic_obs,
+                critic_obs=critic_obs, # type: ignore
                 true_xy=true_xy,
                 reputation=rep.reshape((batch_size,)),
                 info=info,
