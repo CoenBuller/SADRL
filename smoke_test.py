@@ -17,7 +17,7 @@ import jax.numpy as jnp
 import numpy as np
 
 
-from src.train_recurrentMAPPO import make_train_MAPPO
+from algorithms.RecurrentCOMA import make_train_MAPPO
 
 
 
