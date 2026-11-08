@@ -16,11 +16,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-# Adjust import to your train file name
-try:
-    from src.train_recurrentMAPPO import make_train_MAPPO
-except ImportError:
-    from train_recurrentMAPPO import make_train_MAPPO
+
+from src.train_recurrentMAPPO import make_train_MAPPO
+
 
 
 def run_smoke_test():

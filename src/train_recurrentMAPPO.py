@@ -7,7 +7,7 @@ from typing import Any, NamedTuple
 from flax.training.train_state import TrainState
 import flax.linen as nn
 
-from src.algorithms.networks import RecurrentMAPPOAC, LSTM, MAPPOResult
+from src.networks.networks import RecurrentMAPPOAC, LSTM, MAPPOResult
 from src.environments.env_wrapper import Environment
 
 
@@ -130,9 +130,6 @@ def make_train_MAPPO(config):
             rng, _rng_action, _rng_step = jax.random.split(rng, 3)
 
             obs_batch = last_obs.reshape((batch_size, *last_obs.shape[2:]))
-            world_batch = jnp.repeat(
-                env_state[:, None, ...], num_agents, axis=1
-            ).reshape((batch_size, *env_state.shape[1:]))
             dones_batch = last_done.reshape((batch_size,)).astype(jnp.float32)
             last_action_batch = last_action.reshape((batch_size,))
 
@@ -245,7 +242,6 @@ def make_train_MAPPO(config):
             rng, _rng_boot = jax.random.split(rng)
 
             last_obs_batch = last_obs.reshape((batch_size, *last_obs.shape[2:]))  # type: ignore
-            last_world_batch = jnp.repeat(env_state[:, None, ...], num_agents, axis=1).reshape((batch_size, *env_state.shape[1:]))
             agent_id_oh = jnp.repeat(jnp.eye(num_agents)[None, :, :], num_envs, axis=0).reshape((batch_size, num_agents))
 
             actor_obs = (

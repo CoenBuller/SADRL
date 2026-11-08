@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+
 from src.environments.env_wrapper import Environment  # or from src.environments.wrappers import Environment
 
 env = Environment("pd_arena", n_agents=5, n_envs=1)
