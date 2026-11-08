@@ -283,46 +283,36 @@ class RecurrentActor(nn.Module):
 
 
 class CounterFactualCritic(nn.Module):
-    """
-    Direct COMA Counterfactual Critic.
-    Takes global state S_t and current joint actions A_t, masks out ego-agent i's action
-    to form a_t^{-i}, and outputs Q(S_t, (a^i, a_t^{-i})) for all candidate ego actions a^i.
-    """
     action_dim: int
     num_agents: int
 
     @nn.compact
     def __call__(
         self,
-        env_state: jnp.ndarray,      # (T, B, H, W, C)
-        agent_id_oh: jnp.ndarray,    # (T, B, num_agents)
-        joint_actions: jnp.ndarray,  # (T, B, num_agents) -> CURRENT joint actions a_t
+        env_state: jnp.ndarray,         # (T, B, H, W, C_global)
+        global_agent_vec: jnp.ndarray,  # (T, B, num_agents * F)
+        agent_id_oh: jnp.ndarray,       # (T, B, num_agents)
+        joint_actions: jnp.ndarray,     # (T, B, num_agents)
     ) -> jnp.ndarray:
-        batch_prefix = env_state.shape[:-3]  # (T, B)
+        batch_prefix = env_state.shape[:-3]
 
-        # 1. Feedforward CNN over global env state S_t
-        zt = CNN(activation="relu")(env_state)  # (T, B, 64)
+        zt = CNN(activation="relu")(env_state)
 
-        # 2. One-hot encode current joint actions: (T, B, num_agents, action_dim)
         joint_actions_oh = jax.nn.one_hot(joint_actions, self.action_dim)
-
-        # 3. Mask out ego-agent i's own action so the input strictly represents a_t^{-i}
-        peer_mask = 1.0 - agent_id_oh[..., None]  # (T, B, num_agents, 1)
+        peer_mask = 1.0 - agent_id_oh[..., None]
         masked_peers_oh = (joint_actions_oh * peer_mask).reshape((*batch_prefix, -1))
 
-        # 4. Compute Q(S_t, (a^i, a_t^{-i})) for all candidate ego actions a^i simultaneously
-        q_in = jnp.concatenate([zt, masked_peers_oh, agent_id_oh], axis=-1)
+        q_in = jnp.concatenate(
+            [zt, global_agent_vec, masked_peers_oh, agent_id_oh], axis=-1
+        )
         q_hidden = nn.Dense(
             128, kernel_init=orthogonal(jnp.sqrt(2)), bias_init=constant(0.0)
         )(q_in)
         q_hidden = nn.relu(q_hidden)
 
-        q_all_actions = nn.Dense(
+        return nn.Dense(
             self.action_dim, kernel_init=orthogonal(1.0), bias_init=constant(0.0)
         )(q_hidden)
-
-        return q_all_actions
-
 
 class MAPPOResult(NamedTuple):
     hidden: jnp.ndarray
@@ -339,6 +329,7 @@ class RecurrentMAPPOAC(nn.Module):
     small: bool = True
 
     def setup(self):
+        
         self.actor = RecurrentActor(
             action_dim=self.action_dim,
             hidden_dim=self.hidden_dim,
@@ -354,15 +345,16 @@ class RecurrentMAPPOAC(nn.Module):
         self,
         hidden: jnp.ndarray,
         actor_obs: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray],
-        critic_obs: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray],
-    ) -> MAPPOResult:
+        critic_obs: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray],
+        ) -> MAPPOResult:
+
         new_hidden, pi, pred_xy = self.actor(hidden, actor_obs)
         q_all_actions = self.critic(
             env_state=critic_obs[0],
-            agent_id_oh=critic_obs[1],
-            joint_actions=critic_obs[2],
+            global_agent_vec=critic_obs[1],
+            agent_id_oh=critic_obs[2],
+            joint_actions=critic_obs[3],
         )
-
         return MAPPOResult(
             hidden=new_hidden,
             pi=pi,
@@ -370,24 +362,26 @@ class RecurrentMAPPOAC(nn.Module):
             q_all_actions=q_all_actions,
         )
 
+    def forward_critic(
+        self,
+        critic_obs: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray],
+        ) -> jnp.ndarray:
+
+        return self.critic(
+            env_state=critic_obs[0],
+            global_agent_vec=critic_obs[1],
+            agent_id_oh=critic_obs[2],
+            joint_actions=critic_obs[3],
+        )
+
     def forward_actor(
         self,
         hidden: jnp.ndarray,
         actor_obs: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray],
     ) -> tuple[jnp.ndarray, distrax.Categorical, jnp.ndarray]:
+
         """Runs only the RecurrentActor during rollout before joint actions are sampled."""
         return self.actor(hidden, actor_obs)
-
-    def forward_critic(
-        self,
-        critic_obs: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray],
-    ) -> jnp.ndarray:
-        """Runs only the CounterFactualCritic once current joint actions are sampled."""
-        return self.critic(
-            env_state=critic_obs[0],
-            agent_id_oh=critic_obs[1],
-            joint_actions=critic_obs[2],
-        )
 
 
 class MAPPOAC(nn.Module):

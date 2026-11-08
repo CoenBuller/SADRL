@@ -26,40 +26,6 @@ class Transition(NamedTuple):
     info: Any
 
 
-def extract_normalized_xy(
-    env_state: Any,
-    obs: jnp.ndarray,
-    num_envs: int,
-    num_agents: int,
-) -> jnp.ndarray:
-    """
-    Safely extracts normalized (x, y) in [0, 1]^2 of shape (num_envs * num_agents, 2).
-    """
-    if hasattr(env_state, "agent_locs"):
-        map_h, map_w = env_state.grid.shape[1:3]
-        raw_coords = env_state.agent_locs[:, :, :2].astype(jnp.float32)
-        scale = jnp.array(
-            [jnp.maximum(map_h - 1.0, 1.0), jnp.maximum(map_w - 1.0, 1.0)],
-            dtype=jnp.float32,
-        )
-        return (raw_coords / scale).reshape((num_envs * num_agents, 2))
-
-    map_h, map_w = env_state.shape[1:3]
-    ys = jnp.linspace(0.0, 1.0, map_h, dtype=jnp.float32)
-    xs = jnp.linspace(0.0, 1.0, map_w, dtype=jnp.float32)
-    grid_y, grid_x = jnp.meshgrid(ys, xs, indexing="ij")
-
-    weights = nn.softmax(
-        env_state[..., -1].reshape(num_envs, -1), axis=-1
-    ).reshape(num_envs, map_h, map_w)
-    exp_y = (weights * grid_y[None, :, :]).sum(axis=(1, 2))
-    exp_x = (weights * grid_x[None, :, :]).sum(axis=(1, 2))
-    env_xy = jnp.stack([exp_x, exp_y], axis=-1)
-    return jnp.repeat(env_xy[:, None, :], num_agents, axis=1).reshape(
-        (num_envs * num_agents, 2)
-    )
-
-
 def make_train_MAPPO(config):
     env = Environment(
         common_reward=config["COMMON_REWARD"],
@@ -103,10 +69,10 @@ def make_train_MAPPO(config):
             jnp.zeros((batch_size,), dtype=jnp.int32),
         )
 
+        init_global_map, init_agent_vec = env.reconstruct_critic_state(env_state)
         init_critic_obs = (
-            jnp.repeat(env_state[:, None, ...], num_agents, axis=1).reshape(
-                (batch_size, *env_state.shape[1:])
-            ),
+            init_global_map,
+            init_agent_vec,
             jnp.repeat(jnp.eye(num_agents)[None, :, :], num_envs, axis=0).reshape(
                 (batch_size, num_agents)
             ),
@@ -198,7 +164,9 @@ def make_train_MAPPO(config):
 
             # Step 4b: Run COMA Critic conditioned on S_t and current joint actions A_t
             # (CounterFactualCritic internally masks out agent i's own action to get a_t^{-i})
-            critic_obs = (world_batch, agent_id_oh, current_joint_actions)
+
+            global_map, global_agent_vec = env.reconstruct_critic_state(env_state)
+            critic_obs = (global_map, global_agent_vec, agent_id_oh, current_joint_actions)
             critic_obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], critic_obs)
 
             q_vals_seq = network.apply(
@@ -220,9 +188,7 @@ def make_train_MAPPO(config):
                 _rng_step, actions_per_env, (env_state, rep)
             )
 
-            true_xy = extract_normalized_xy(
-                env_state, last_obs, num_envs, num_agents
-            )
+            true_xy = env.extract_normalized_xy(env_state)
 
             done_flat = done.reshape((batch_size,)).astype(jnp.float32)      # type: ignore
             reward_flat = reward.reshape((batch_size,)).astype(jnp.float32)  # type: ignore
@@ -279,12 +245,8 @@ def make_train_MAPPO(config):
             rng, _rng_boot = jax.random.split(rng)
 
             last_obs_batch = last_obs.reshape((batch_size, *last_obs.shape[2:]))  # type: ignore
-            last_world_batch = jnp.repeat(
-                env_state[:, None, ...], num_agents, axis=1
-            ).reshape((batch_size, *env_state.shape[1:]))
-            agent_id_oh = jnp.repeat(
-                jnp.eye(num_agents)[None, :, :], num_envs, axis=0
-            ).reshape((batch_size, num_agents))
+            last_world_batch = jnp.repeat(env_state[:, None, ...], num_agents, axis=1).reshape((batch_size, *env_state.shape[1:]))
+            agent_id_oh = jnp.repeat(jnp.eye(num_agents)[None, :, :], num_envs, axis=0).reshape((batch_size, num_agents))
 
             actor_obs = (
                 last_obs_batch,
@@ -302,11 +264,10 @@ def make_train_MAPPO(config):
 
             boot_action = pi_last.sample(seed=_rng_boot).squeeze(0)# type: ignore
             boot_actions_per_env = boot_action.reshape((num_envs, num_agents))
-            boot_joint_actions = jnp.repeat(
-                boot_actions_per_env[:, None, :], num_agents, axis=1
-            ).reshape((batch_size, num_agents))
+            boot_joint_actions = jnp.repeat(boot_actions_per_env[:, None, :], num_agents, axis=1).reshape((batch_size, num_agents))
 
-            critic_obs = (last_world_batch, agent_id_oh, boot_joint_actions)
+            last_global_map, last_agent_vec = env.reconstruct_critic_state(env_state)
+            critic_obs = (last_global_map, last_agent_vec, agent_id_oh, boot_joint_actions)
             critic_obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], critic_obs)
 
             q_last = network.apply(

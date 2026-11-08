@@ -18,9 +18,9 @@ import numpy as np
 
 # Adjust import to your train file name
 try:
-    from train_recurrentMAPPO import make_train_MAPPO
+    from src.train_recurrentMAPPO import make_train_MAPPO
 except ImportError:
-    from train_recurrentMAPPO_4 import make_train_MAPPO
+    from train_recurrentMAPPO import make_train_MAPPO
 
 
 def run_smoke_test():
