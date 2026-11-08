@@ -1,31 +1,32 @@
-ENV_NAME: "gift"
+# Environment
+ENV_NAME: "clean_up"
 N_AGENTS: 5
 N_ENVS: 100
-TOTAL_TIMESTEPS: int(1e8)
+TOTAL_TIMESTEPS: 100000000
 NUM_STEPS: 100
 SEED: 30
 
 # Storage
-WANDB: True
+WANDB: true
 GIF_FRAMES: 1000
 OUT_DIR: "results"
 
 # Algorithm
-ALGO: str = "RecurrentCOMA"
-SMALL: bool = True     # Use the small actor criti or not.
-HIDDEN_DIM: int = 32
+ALGO: "RecurrentCOMA"
+SMALL: true
+HIDDEN_DIM: 32
 
 # Optimization loop
 UPDATE_EPOCHS: 10
 NUM_MINIBATCHES: 10000
 
 # Optimizer
-MAX_GRAD_NORM: float = 0.5
-LR: float = 1e-4
+MAX_GRAD_NORM: 0.5
+LR: 0.0001
 
 # Advantage & Loss
-GAMMA: float = 0.99
-GAE_LAMBDA: float = 0.95
-CLIP_EPS: float = 0.2
-VF_COEF: float = 0.5 
-ENT_COEF: float = 0.03
+GAMMA: 0.99
+GAE_LAMBDA: 0.95
+CLIP_EPS: 0.2
+VF_COEF: 0.5 
+ENT_COEF: 0.03
