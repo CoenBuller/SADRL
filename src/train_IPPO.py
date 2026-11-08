@@ -7,7 +7,7 @@ from typing import NamedTuple
 from flax.training.train_state import TrainState
 
 from src.algorithms.networks import ActorCritic
-from environments.env_wrapper import Environment
+from src.environments.env_wrapper import Environment
 
 class Transition(NamedTuple):
     done: jnp.ndarray

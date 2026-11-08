@@ -8,7 +8,7 @@ from flax.training.train_state import TrainState
 import flax.linen as nn
 
 from src.algorithms.networks import RecurrentMAPPOAC, LSTM, MAPPOResult
-from environments.env_wrapper import Environment
+from src.environments.env_wrapper import Environment
 
 
 class Transition(NamedTuple):

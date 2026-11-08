@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as jnp
-from environments.env_wrapper import Environment
+from src.environments.env_wrapper import Environment
 
 env = Environment("pd_arena", n_agents=5, n_envs=2, reputation=True)
 rng = jax.random.PRNGKey(seed=42)
