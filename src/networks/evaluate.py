@@ -1,7 +1,7 @@
 import jax, jax.numpy as jnp, numpy as np, wandb
 from pathlib import Path
 from PIL import Image
-from src.algorithms.networks import ActorCritic
+from src.networks.networks import ActorCritic
 from src.environments.env_wrapper import Environment
 
 
