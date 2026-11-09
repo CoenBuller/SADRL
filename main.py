@@ -38,6 +38,7 @@ def main():
     p.add_argument("--pos_coef", type=float, default=None)
     p.add_argument("--wandb", type=_BOOL, default=None)
     p.add_argument("--total_timesteps", type=int, default=None)
+    p.add_argument("--n_agents", type=int, default=None)
     args = p.parse_args()
 
     # 1. Load YAML overrides (if provided)
@@ -66,6 +67,9 @@ def main():
         cli_overrides["WANDB"] = args.wandb
     if args.total_timesteps is not None:
         cli_overrides["TOTAL_TIMESTEPS"] = args.total_timesteps
+    if args.n_agents is not None:
+        cli_overrides["N_AGENTS"] = args.n_agents
+    
 
     # 3. Merge hierarchy: Config() -> YAML -> CLI
     merged_overrides = {**yaml_overrides, **cli_overrides}

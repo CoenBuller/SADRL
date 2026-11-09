@@ -24,6 +24,7 @@ PARALLEL="${PARALLEL:-0}"
 SMOKE="${SMOKE:-0}"
 LOG_DIR="${LOG_DIR:-local_logs}"
 PYTHON="${PYTHON:-python}"
+N_AGENTS="${N_AGENTS:-7}"
 
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 export PYTHONUNBUFFERED=1
@@ -47,7 +48,7 @@ run_one() {
 
     echo "[$(date +%H:%M:%S)] START $name -> $log"
     "$PYTHON" main.py --config "$CONFIG" --algo "$algo" --predict_pos "$pos" \
-        --env "$ENV_NAME" --seed "$seed" --wandb "$WANDB" "${extra[@]}" > "$log" 2>&1
+        --env "$ENV_NAME" --seed "$seed" --wandb "$WANDB" --n_agents "$N_AGENTS" "${extra[@]}" > "$log" 2>&1
 }
 
 for seed in $SEEDS; do
