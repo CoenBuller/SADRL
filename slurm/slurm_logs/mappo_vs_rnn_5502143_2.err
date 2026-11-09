@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/zfsstore/user/s2631415/SADRL/main.py", line 15, in <module>
+    from src.algorithms.COMA import make_train_COMA
+  File "/zfsstore/user/s2631415/SADRL/src/algorithms/COMA.py", line 9, in <module>
+    from src.networks.networks2 import FeedforwardCOMAAC
+ImportError: cannot import name 'FeedforwardCOMAAC' from 'src.networks.networks2' (/zfsstore/user/s2631415/SADRL/src/networks/networks2.py)

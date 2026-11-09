@@ -2,10 +2,10 @@
 #SBATCH --job-name=mappo_vs_rnn
 #SBATCH --output=slurm_logs/%x_%A_%a.out
 #SBATCH --error=slurm_logs/%x_%A_%a.err
-#SBATCH --partition=gpu-short
+#SBATCH --partition=gpu-l4-24g
 #SBATCH --gres=gpu:1
-#SBATCH --time=04:00:00
-#SBATCH --mem=16G
+#SBATCH --time=12:00:00
+#SBATCH --mem=20G
 #SBATCH --array=0-5   # 2 algos (MAPPO, RecurrentMAPPO) x 3 seeds (30, 31, 32)
 
 set -e

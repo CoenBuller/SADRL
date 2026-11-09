@@ -3,10 +3,10 @@
 #SBATCH --output=slurm_logs/%x_%A_%a.out
 #SBATCH --error=slurm_logs/%x_%A_%a.err
 #SBATCH --partition=gpu-short
-#SBATCH --gres=gpu:a100:1
+#SBATCH --gres=gpu:1
 #SBATCH --time=4:00:00
-#SBATCH --mem=40G
-#SBATCH --array=0-7
+#SBATCH --mem=20G
+#SBATCH --array=1-7
 
 # Exit immediately if a command exits with a non-zero status
 set -e
