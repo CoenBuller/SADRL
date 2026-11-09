@@ -36,6 +36,8 @@ def main():
     p.add_argument("--rep", type=_BOOL, default=None)
     p.add_argument("--predict_pos", type=_BOOL, default=None, help="Auxiliary position prediction (RecurrentMAPPO only)")
     p.add_argument("--pos_coef", type=float, default=None)
+    p.add_argument("--wandb", type=_BOOL, default=None)
+    p.add_argument("--total_timesteps", type=int, default=None)
     args = p.parse_args()
 
     # 1. Load YAML overrides (if provided)
@@ -60,6 +62,10 @@ def main():
         cli_overrides["PREDICT_POS"] = args.predict_pos
     if args.pos_coef is not None:
         cli_overrides["POS_COEF"] = args.pos_coef
+    if args.wandb is not None:
+        cli_overrides["WANDB"] = args.wandb
+    if args.total_timesteps is not None:
+        cli_overrides["TOTAL_TIMESTEPS"] = args.total_timesteps
 
     # 3. Merge hierarchy: Config() -> YAML -> CLI
     merged_overrides = {**yaml_overrides, **cli_overrides}
