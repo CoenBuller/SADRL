@@ -1,7 +1,7 @@
 # Environment (Mario's Clean Up setup)
 ENV_NAME: "clean_up"
 N_AGENTS: 7
-N_ENVS: 4
+N_ENVS: 10
 TOTAL_TIMESTEPS: 100000000
 NUM_STEPS: 100
 SEED: 30
