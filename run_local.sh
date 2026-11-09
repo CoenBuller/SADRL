@@ -32,7 +32,7 @@ mkdir -p "$LOG_DIR"
 
 if [ "$SMOKE" = "1" ]; then
     echo "Running smoke test first..."
-    "$PYTHON" smoke_test.py --env "$ENV_NAME" || { echo "Smoke test failed, aborting."; exit 1; }
+    uv run smoke_test.py --env "$ENV_NAME" || { echo "Smoke test failed, aborting."; exit 1; }
 fi
 
 pids=()
@@ -47,7 +47,7 @@ run_one() {
     [ -n "$TOTAL_TIMESTEPS" ] && extra+=(--total_timesteps "$TOTAL_TIMESTEPS")
 
     echo "[$(date +%H:%M:%S)] START $name -> $log"
-    "$PYTHON" main.py --config "$CONFIG" --algo "$algo" --predict_pos "$pos" \
+    uv run main.py --config "$CONFIG" --algo "$algo" --predict_pos "$pos" \
         --env "$ENV_NAME" --seed "$seed" --wandb "$WANDB" --n_agents "$N_AGENTS" "${extra[@]}" > "$log" 2>&1
 }
 
