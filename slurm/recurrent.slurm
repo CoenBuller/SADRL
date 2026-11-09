@@ -2,10 +2,10 @@
 #SBATCH --job-name=mappo_vs_rnn
 #SBATCH --output=slurm_logs/%x_%A_%a.out
 #SBATCH --error=slurm_logs/%x_%A_%a.err
-#SBATCH --partition=gpu-short
+#SBATCH --partition=gpu-l4-24g
 #SBATCH --gres=gpu:1
 #SBATCH --time=12:00:00
-#SBATCH --mem=16G
+#SBATCH --mem=23G
 #SBATCH --array=0-5   # 6 tasks: 3 variants x 2 seeds (30, 31)
 # NOTE: run `mkdir -p slurm_logs` BEFORE sbatch; Slurm opens the log files before this script starts.
 
