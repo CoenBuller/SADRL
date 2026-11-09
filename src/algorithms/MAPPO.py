@@ -71,7 +71,7 @@ def make_train_MAPPO(config):
         agent_state = TrainState.create(apply_fn=network.apply, params=network_params, tx=tx)
 
         def _env_step(runner_state, unused):
-            agent_state, env_state, last_obs, rep, ep_returns, update_step, rng = runner_state
+            agent_state, env_state, last_obs, rep, ep_returns, returned_ep_returns, update_step, rng = runner_state
             rng, _rng_action, _rng_step = jax.random.split(rng, 3)
 
             obs_batch = last_obs.reshape((batch_size, *last_obs.shape[2:]))
@@ -91,9 +91,8 @@ def make_train_MAPPO(config):
             done_flat = done.reshape((batch_size,)).astype(jnp.float32)      # type: ignore
 
             new_ep_returns = ep_returns + reward_flat
-            finished_ep_returns = new_ep_returns * done_flat
+            new_returned_ep_returns = jnp.where(done_flat > 0.5, new_ep_returns, returned_ep_returns)
             ep_returns = new_ep_returns * (1.0 - done_flat)
-            info["finished_ep_returns"] = finished_ep_returns
 
             transition = Transition(
                 done=done_flat,
@@ -105,7 +104,7 @@ def make_train_MAPPO(config):
                 obs=(obs_batch, world_batch),
                 info=info,
             )
-            runner_state = (agent_state, next_env_state, next_obs, next_rep, ep_returns, update_step, rng)
+            runner_state = (agent_state, next_env_state, next_obs, next_rep, ep_returns, new_returned_ep_returns, update_step, rng)
             return runner_state, transition
 
         def _update_step(runner_state, unused):
@@ -113,7 +112,7 @@ def make_train_MAPPO(config):
                 _env_step, runner_state, None, config["NUM_STEPS"]
             )
 
-            agent_state, env_state, last_obs, rep, ep_returns, update_step, rng = runner_state
+            agent_state, env_state, last_obs, rep, ep_returns, returned_ep_returns, update_step, rng = runner_state
             last_obs_batch = last_obs.reshape((batch_size, *last_obs.shape[2:]))  # type: ignore
             last_world_batch = make_world_state(last_obs, num_envs, num_agents)
             _, last_val = network.apply(agent_state.params, (last_obs_batch, last_world_batch))  # type: ignore
@@ -207,9 +206,7 @@ def make_train_MAPPO(config):
 
             total_loss, (loss_actor, loss_critic, entropy, approx_kl) = loss_info
 
-            finished_returns = traj_batch.info["finished_ep_returns"]
-            num_done = jnp.maximum(traj_batch.done.sum(), 1.0)
-            episode_return = finished_returns.sum() / num_done
+            episode_return = returned_ep_returns.mean()
             team_return = episode_return * num_agents
 
             def _log_to_wandb(metrics_dict):
@@ -236,19 +233,20 @@ def make_train_MAPPO(config):
 
             if isinstance(traj_batch.info, dict):
                 for k, v in traj_batch.info.items():
-                    if k != "finished_ep_returns" and isinstance(v, jnp.ndarray) and v.size > 0:
+                    if isinstance(v, jnp.ndarray) and v.size > 0:
                         metrics[f"env_info/{k}"] = v.mean()
 
             if config["WANDB"]:
                 jax.debug.callback(_log_to_wandb, metrics)
 
             update_step = update_step + 1
-            runner_state = (agent_state, env_state, last_obs, rep, ep_returns, update_step, rng)
+            runner_state = (agent_state, env_state, last_obs, rep, ep_returns, returned_ep_returns, update_step, rng)
             return runner_state, metrics
 
         rng, _rng = jax.random.split(rng)
         init_ep_returns = jnp.zeros((batch_size,), dtype=jnp.float32)
-        runner_state = (agent_state, env_state, obs, rep, init_ep_returns, 0, _rng)
+        init_returned_ep_returns = jnp.zeros((batch_size,), dtype=jnp.float32)
+        runner_state = (agent_state, env_state, obs, rep, init_ep_returns, init_returned_ep_returns, 0, _rng)
         runner_state, metrics = jax.lax.scan(_update_step, runner_state, None, num_updates)
         return {"runner_state": runner_state, "metrics": metrics}
 

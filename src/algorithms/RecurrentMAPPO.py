@@ -88,6 +88,7 @@ def make_train_recurrent(config):
                 last_action,
                 last_done,
                 ep_returns,
+                returned_ep_returns,
                 update_step,
                 rng,
             ) = runner_state
@@ -126,9 +127,8 @@ def make_train_recurrent(config):
             done_flat = done.reshape((batch_size,)).astype(jnp.float32)      # type: ignore
 
             new_ep_returns = ep_returns + reward_flat
-            finished_ep_returns = new_ep_returns * done_flat
+            new_returned_ep_returns = jnp.where(done_flat > 0.5, new_ep_returns, returned_ep_returns)
             ep_returns = new_ep_returns * (1.0 - done_flat)
-            info["finished_ep_returns"] = finished_ep_returns
 
             transition = Transition(
                 done=done_flat,
@@ -152,6 +152,7 @@ def make_train_recurrent(config):
                 actions_per_env,
                 done_flat,
                 ep_returns,
+                new_returned_ep_returns,
                 update_step,
                 rng,
             )
@@ -173,6 +174,7 @@ def make_train_recurrent(config):
                 last_action,
                 last_done,
                 ep_returns,
+                returned_ep_returns,
                 update_step,
                 rng,
             ) = runner_state
@@ -315,9 +317,7 @@ def make_train_recurrent(config):
 
             total_loss, (loss_actor, loss_critic, entropy, approx_kl, pos_loss) = loss_info
 
-            finished_returns = traj_batch.info["finished_ep_returns"]
-            num_done = jnp.maximum(traj_batch.done.sum(), 1.0)
-            episode_return = finished_returns.sum() / num_done
+            episode_return = returned_ep_returns.mean()
             team_return = episode_return * num_agents
 
             def _log_to_wandb(metrics_dict):
@@ -345,7 +345,7 @@ def make_train_recurrent(config):
 
             if isinstance(traj_batch.info, dict):
                 for k, v in traj_batch.info.items():
-                    if k != "finished_ep_returns" and isinstance(v, jnp.ndarray) and v.size > 0:
+                    if isinstance(v, jnp.ndarray) and v.size > 0:
                         metrics[f"env_info/{k}"] = v.mean()
 
             if config["WANDB"]:
@@ -361,6 +361,7 @@ def make_train_recurrent(config):
                 last_action,
                 last_done,
                 ep_returns,
+                returned_ep_returns,
                 update_step,
                 rng,
             )
@@ -371,6 +372,7 @@ def make_train_recurrent(config):
         init_last_action = jnp.zeros((num_envs, num_agents), dtype=jnp.int32)
         init_last_done = jnp.ones((batch_size,), dtype=jnp.float32)
         init_ep_returns = jnp.zeros((batch_size,), dtype=jnp.float32)
+        init_returned_ep_returns = jnp.zeros((batch_size,), dtype=jnp.float32)
 
         runner_state = (
             agent_state,
@@ -381,6 +383,7 @@ def make_train_recurrent(config):
             init_last_action,
             init_last_done,
             init_ep_returns,
+            init_returned_ep_returns,
             0,
             _rng,
         )
