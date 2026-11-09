@@ -56,7 +56,7 @@ def make_train_recurrent(config):
 
         init_actor_obs = (
             jnp.zeros((1, batch_size, *obs.shape[2:])),
-            jnp.zeros((1, batch_size), dtype=jnp.float32),
+            jnp.ones((1, batch_size), dtype=jnp.float32),
             jnp.zeros((1, batch_size), dtype=jnp.int32),
         )
         init_world_state = make_world_state(obs, num_envs, num_agents)[None, ...]
@@ -313,6 +313,7 @@ def make_train_recurrent(config):
                 "rollout/mean_reward": traj_batch.reward.mean(),
                 "rollout/std_reward": traj_batch.reward.std(),
                 "rollout/mean_value": traj_batch.value.mean(),
+                "rollout/std_value": traj_batch.value.std(),
                 "losses/total_loss": total_loss.mean(),
                 "losses/actor_loss": loss_actor.mean(),
                 "losses/critic_loss": loss_critic.mean(),
@@ -346,7 +347,7 @@ def make_train_recurrent(config):
         rng, _rng = jax.random.split(rng)
         init_hidden = LSTM.initialize_carry(batch_size, config["HIDDEN_DIM"])
         init_last_action = jnp.zeros((num_envs, num_agents), dtype=jnp.int32)
-        init_last_done = jnp.zeros((batch_size,), dtype=jnp.float32)
+        init_last_done = jnp.ones((batch_size,), dtype=jnp.float32)
         init_ep_returns = jnp.zeros((batch_size,), dtype=jnp.float32)
 
         runner_state = (

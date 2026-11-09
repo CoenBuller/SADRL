@@ -42,7 +42,7 @@ def make_gif(params, config, num_frames=1000, out_dir="evaluation"):
 
     hidden = LSTM.initialize_carry(num_agents, config["HIDDEN_DIM"]) if algo == "RecurrentMAPPO" else None
     last_action = jnp.zeros((num_agents,), dtype=jnp.int32)
-    last_done = jnp.zeros((num_agents,), dtype=jnp.float32)
+    last_done = jnp.ones((num_agents,), dtype=jnp.float32)
 
     frames = []
     for _ in range(num_frames):

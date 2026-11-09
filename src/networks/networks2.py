@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import jax
 
 
-class SmallCNN(object := nn.Module):
+class SmallCNN(nn.Module):
     """Mario's best trunk: 1 conv layer (16 filters, 3x3) + full FC (64 units)."""
     activation: str = "relu"
 
@@ -126,6 +126,8 @@ class RecurrentActor(nn.Module):
 
         zt = SmallCNN(activation=self.activation)(obs)
         oh_last_action = jax.nn.one_hot(last_actions, num_classes=self.action_dim)
+        # Zero out previous action one-hot vector at episode boundaries
+        oh_last_action = jnp.where(dones[..., None] > 0.5, 0.0, oh_last_action)
         rnn_in = jnp.concatenate([zt, oh_last_action], axis=-1)
 
         new_hidden, rnn_out = LSTM(hidden_dim=self.hidden_dim)(hidden, (rnn_in, dones))

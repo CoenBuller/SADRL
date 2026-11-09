@@ -12,9 +12,7 @@ from flax.serialization import to_bytes
 from src.config import Config
 from src.algorithms.IPPO import make_train_IPPO
 from src.algorithms.MAPPO import make_train_MAPPO
-from src.algorithms.COMA import make_train_COMA
 from src.algorithms.RecurrentMAPPO import make_train_recurrent
-from src.algorithms.RecurrentCOMA import make_train_recurrent_COMA
 from src.evaluate import make_gif
 
 
@@ -78,14 +76,10 @@ def main():
         train_fn = make_train_IPPO(config_dict)
     elif algo == "MAPPO":
         train_fn = make_train_MAPPO(config_dict)
-    elif algo == "COMA":
-        train_fn = make_train_COMA(config_dict)
     elif algo == "RecurrentMAPPO":
         train_fn = make_train_recurrent(config_dict)
-    elif algo == "RecurrentCOMA":
-        train_fn = make_train_recurrent_COMA(config_dict)
     else:
-        raise ValueError(f"Unknown ALGO: {algo}")
+        raise ValueError(f"Unknown ALGO: {algo}. Expected 'IPPO', 'MAPPO', or 'RecurrentMAPPO'.")
 
     jit_train_fn = jax.jit(train_fn)
 
