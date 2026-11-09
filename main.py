@@ -15,6 +15,16 @@ from src.algorithms.MAPPO import make_train_MAPPO
 from src.algorithms.RecurrentMAPPO import make_train_recurrent
 from src.evaluate import make_gif
 
+_BOOL = lambda x: (str(x).lower() in ["true", "1", "yes"])
+
+
+def make_tag(cfg: dict) -> str:
+    """Unique run tag. The position-prediction variant gets a suffix so it never overwrites the baseline."""
+    tag = f"{cfg['ALGO']}_{cfg['ENV_NAME']}_{cfg['SEED']}_rep_{cfg['REPUTATION']}"
+    if cfg["PREDICT_POS"]:
+        tag += "_pos"
+    return tag
+
 
 def main():
     p = argparse.ArgumentParser(description="Run MARL Training")
@@ -23,7 +33,9 @@ def main():
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--num_steps", type=int, default=None)
     p.add_argument("--algo", type=str, default=None)
-    p.add_argument("--rep", type=lambda x: (str(x).lower() in ["true", "1", "yes"]), default=None)
+    p.add_argument("--rep", type=_BOOL, default=None)
+    p.add_argument("--predict_pos", type=_BOOL, default=None, help="Auxiliary position prediction (RecurrentMAPPO only)")
+    p.add_argument("--pos_coef", type=float, default=None)
     args = p.parse_args()
 
     # 1. Load YAML overrides (if provided)
@@ -44,6 +56,10 @@ def main():
         cli_overrides["ALGO"] = args.algo
     if args.rep is not None:
         cli_overrides["REPUTATION"] = args.rep
+    if args.predict_pos is not None:
+        cli_overrides["PREDICT_POS"] = args.predict_pos
+    if args.pos_coef is not None:
+        cli_overrides["POS_COEF"] = args.pos_coef
 
     # 3. Merge hierarchy: Config() -> YAML -> CLI
     merged_overrides = {**yaml_overrides, **cli_overrides}
@@ -57,29 +73,34 @@ def main():
     raw_config = dataclasses.replace(Config(), **safe_overrides)
     config_dict = dataclasses.asdict(raw_config)
 
+    algo = config_dict["ALGO"]
+    if algo not in ("IPPO", "MAPPO", "RecurrentMAPPO"):
+        raise ValueError(f"Unknown ALGO: {algo}. Expected 'IPPO', 'MAPPO', or 'RecurrentMAPPO'.")
+    if config_dict["PREDICT_POS"] and algo != "RecurrentMAPPO":
+        raise ValueError(f"PREDICT_POS=True requires ALGO=RecurrentMAPPO (got {algo}).")
+
+    tag = make_tag(config_dict)
+
     # 4. Initialize Weights & Biases
     if config_dict["WANDB"]:
         wandb.init(
             project="sadrl",
             entity="coen-sadrl",
             config=config_dict,
-            name=f"{config_dict['ALGO']}_{config_dict['ENV_NAME']}_{config_dict['SEED']}_rep_{config_dict['REPUTATION']}",
+            name=tag,
             monitor_gym=False,
             save_code=True,
         )
 
     # 5. Build and JIT compile the training loop
-    algo = config_dict["ALGO"]
-    print(f"Compiling {algo} training loop (this may take a few minutes)...")
+    print(f"Compiling {tag} training loop (this may take a few minutes)...")
 
     if algo == "IPPO":
         train_fn = make_train_IPPO(config_dict)
     elif algo == "MAPPO":
         train_fn = make_train_MAPPO(config_dict)
-    elif algo == "RecurrentMAPPO":
-        train_fn = make_train_recurrent(config_dict)
     else:
-        raise ValueError(f"Unknown ALGO: {algo}. Expected 'IPPO', 'MAPPO', or 'RecurrentMAPPO'.")
+        train_fn = make_train_recurrent(config_dict)
 
     jit_train_fn = jax.jit(train_fn)
 
@@ -93,7 +114,6 @@ def main():
     Path(config_dict["OUT_DIR"]).mkdir(parents=True, exist_ok=True)
 
     metrics_np = jax.tree_util.tree_map(lambda x: np.array(x), output["metrics"])
-    tag = f"{config_dict['ALGO']}_{config_dict['ENV_NAME']}_{config_dict['SEED']}_rep_{config_dict['REPUTATION']}"
 
     df = pd.DataFrame(metrics_np)
     df.to_csv(f"{config_dict['OUT_DIR']}/training_metrics_{tag}.csv", index=False)

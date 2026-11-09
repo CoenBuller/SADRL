@@ -12,16 +12,22 @@ GIF_FRAMES: 1000
 OUT_DIR: "results"
 
 # Algorithm & Architecture (SmallCNN + 64 FC)
-ALGO: "RecurrentMAPPO"
+ALGO: "RecurrentMAPPO"      # overridden by --algo
 COMMON_REWARD: true
 REPUTATION: false
 SMALL: true
 HIDDEN_DIM: 64
 ACTIVATION: "relu"
 
+# Auxiliary position prediction (RecurrentMAPPO only)
+PREDICT_POS: false          # overridden by --predict_pos
+POS_COEF: 0.5               # MSE on [0,1]^2 is ~0.08 at chance, so 0.1 is a very weak signal; sweep 0.1/0.5/1.0
+MAP_H: null                 # null = infer from env state
+MAP_W: null
+
 # Optimization loop (4 * 7 * 100 = 2800 samples / 4 minibatches = 700 samples/minibatch)
 UPDATE_EPOCHS: 4
-NUM_MINIBATCHES: 4
+NUM_MINIBATCHES: 4          # must divide N_ENVS * N_AGENTS (28)
 
 # Optimizer
 MAX_GRAD_NORM: 0.5

@@ -109,41 +109,6 @@ class LSTM(nn.Module):
         return jnp.zeros((batch_size, hidden_dim), dtype=jnp.float32)
 
 
-class RecurrentActor(nn.Module):
-    action_dim: int
-    activation: str = "relu"
-    hidden_dim: int = 64
-    small: bool = True
-
-    @nn.compact
-    def __call__(
-        self,
-        hidden: jnp.ndarray,
-        x: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray],
-    ) -> tuple[jnp.ndarray, distrax.Categorical]:
-        obs, dones, last_actions = x  # (T, B, H, W, C), (T, B), (T, B)
-        activation = nn.relu if self.activation == "relu" else nn.tanh
-
-        zt = SmallCNN(activation=self.activation)(obs)
-        oh_last_action = jax.nn.one_hot(last_actions, num_classes=self.action_dim)
-        # Zero out previous action one-hot vector at episode boundaries
-        oh_last_action = jnp.where(dones[..., None] > 0.5, 0.0, oh_last_action)
-        rnn_in = jnp.concatenate([zt, oh_last_action], axis=-1)
-
-        new_hidden, rnn_out = LSTM(hidden_dim=self.hidden_dim)(hidden, (rnn_in, dones))
-
-        actor_mean = nn.Dense(
-            64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
-        )(rnn_out)
-        actor_mean = activation(actor_mean)
-        action_logits = nn.Dense(
-            self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
-        )(actor_mean)
-        pi = distrax.Categorical(logits=action_logits)
-
-        return new_hidden, pi
-
-
 class MAPPOAC(nn.Module):
     """Standard Feedforward MAPPO."""
     action_dim: int
@@ -158,26 +123,55 @@ class MAPPOAC(nn.Module):
         return pi, value
 
 
+class RecurrentActor(nn.Module):
+    action_dim: int
+    activation: str = "relu"
+    hidden_dim: int = 64
+    small: bool = True
+    predict_pos: bool = False
+
+    @nn.compact
+    def __call__(self, hidden, x):
+        obs, dones, last_actions = x
+        activation = nn.relu if self.activation == "relu" else nn.tanh
+
+        zt = SmallCNN(activation=self.activation)(obs)
+        oh_last_action = jax.nn.one_hot(last_actions, num_classes=self.action_dim)
+        oh_last_action = jnp.where(dones[..., None] > 0.5, 0.0, oh_last_action)
+        rnn_in = jnp.concatenate([zt, oh_last_action], axis=-1)
+
+        new_hidden, rnn_out = LSTM(hidden_dim=self.hidden_dim)(hidden, (rnn_in, dones))
+
+        actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(rnn_out)
+        actor_mean = activation(actor_mean)
+        action_logits = nn.Dense(self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0))(actor_mean)
+        pi = distrax.Categorical(logits=action_logits)
+
+        pos_pred = None
+        if self.predict_pos:
+            p = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(rnn_out)
+            p = activation(p)
+            p = nn.Dense(2, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(p)
+            pos_pred = nn.sigmoid(p)
+
+        return new_hidden, pi, pos_pred
+
+
 class RecurrentMAPPOAC(nn.Module):
-    """Recurrent Actor + Standard Centralized Critic V(s)."""
     action_dim: int
     hidden_dim: int = 64
     small: bool = True
     activation: str = "relu"
+    predict_pos: bool = False
 
     @nn.compact
-    def __call__(
-        self,
-        hidden: jnp.ndarray,
-        actor_obs: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray],
-        world_state: jnp.ndarray,
-    ) -> tuple[jnp.ndarray, distrax.Categorical, jnp.ndarray]:
-        new_hidden, pi = RecurrentActor(
+    def __call__(self, hidden, actor_obs, world_state):
+        new_hidden, pi, pos_pred = RecurrentActor(
             action_dim=self.action_dim,
             hidden_dim=self.hidden_dim,
             activation=self.activation,
             small=self.small,
+            predict_pos=self.predict_pos,
         )(hidden, actor_obs)
-
         value = Critic(activation=self.activation, small=self.small)(world_state)
-        return new_hidden, pi, value
+        return new_hidden, pi, value, pos_pred

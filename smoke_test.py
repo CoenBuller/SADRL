@@ -1,57 +1,59 @@
 """
-Self-contained smoke test script for testing all MAPPO/COMA ablation baselines.
-Executes without external config files, validates JIT tracing, BPTT shapes,
-and asserts finite losses and gradient flow within < 2 GB VRAM.
+Smoke test for the three runs in recurrent.slurm:
+  1. MAPPO                       (feedforward)
+  2. RecurrentMAPPO              (no position prediction)
+  3. RecurrentMAPPO + PREDICT_POS
+
+Checks: env map-size inference + normalized positions in [0,1], JIT tracing,
+finite losses/params, and that pos_loss behaves as expected for each variant.
+
+Usage: python smoke_test.py [--env clean_up] [--n_agents 7]
 """
 
 import os
 import sys
+import argparse
+import traceback
 
-# Configure JAX memory allocation conservatively before importing JAX
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.5"
 os.environ["PYTHONUNBUFFERED"] = "1"
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 
-# Import the builders for all four ablations
 from src.algorithms.MAPPO import make_train_MAPPO
 from src.algorithms.RecurrentMAPPO import make_train_recurrent
-from src.algorithms.COMA import make_train_COMA
-from src.algorithms.RecurrentCOMA import make_train_recurrent_COMA
+from src.environments.env_wrapper import Environment
 
-def run_smoke_test():
-    print("=" * 80)
-    print("Starting Comprehensive Ablation Smoke Test")
-    print(f"JAX backend: {jax.default_backend()} | Devices: {jax.devices()}")
-    print("=" * 80)
 
-    # Minimal test configuration for rapid compilation and low memory
-    base_config = {
+def make_config(env_name, n_agents):
+    n_envs = 4
+    num_steps = 10
+    return {
         # Environment
-        "ENV_NAME": "gift",
-        "N_AGENTS": 5,
-        "N_ENVS": 4,
+        "ENV_NAME": env_name,
+        "N_AGENTS": n_agents,
+        "N_ENVS": n_envs,
         "SEED": 42,
         "COMMON_REWARD": True,
         "REPUTATION": False,
         "OWN_POS": (9, 5),
         "REP_DECAY": 0.95,
-
-        # Algorithm & Network
+        # Network
         "SMALL": True,
         "ACTIVATION": "relu",
         "HIDDEN_DIM": 16,
-
-        # Rollout & Optimization sizes
-        # 10 steps * 4 envs * 5 agents = 200 transitions
-        "NUM_STEPS": 10,
+        # Position prediction
+        "PREDICT_POS": False,
+        "POS_COEF": 0.5,
+        "MAP_H": None,
+        "MAP_W": None,
+        # Rollout / optimisation (batch = n_envs * n_agents must be divisible by NUM_MINIBATCHES)
+        "NUM_STEPS": num_steps,
         "NUM_MINIBATCHES": 2,
         "UPDATE_EPOCHS": 1,
-        "TOTAL_TIMESTEPS": 80,  # Exactly 2 update cycles (80 // (10 * 4))
-
+        "TOTAL_TIMESTEPS": 2 * num_steps * n_envs,  # exactly 2 updates
         # Hyperparameters
         "LR": 3e-4,
         "ANNEAL_LR": False,
@@ -61,84 +63,126 @@ def run_smoke_test():
         "CLIP_EPS": 0.2,
         "VF_COEF": 0.5,
         "ENT_COEF": 0.01,
-
-        # Logging & I/O
+        # I/O
         "WANDB": False,
         "OUT_DIR": "results_smoke_test",
         "GIF_FRAMES": 0,
     }
 
-    ablations = {
-        "MAPPO (Feedforward + Scalar Critic)": make_train_MAPPO,
-        "RecurrentMAPPO (RNN + Scalar Critic)": make_train_recurrent,
-        "COMA (Feedforward + COMA Critic)": make_train_COMA,
-        "RecurrentCOMA (RNN + COMA Critic)": make_train_recurrent_COMA,
-    }
 
-    for algo_name, train_builder in ablations.items():
-        print(f"\n{'=' * 80}")
-        print(f"Testing: {algo_name}")
-        print(f"{'=' * 80}")
-        
-        # Inject the algo name into the config
-        test_config = base_config.copy()
-        test_config["ALGO"] = algo_name.split()[0] # Grab the prefix just in case it's used internally
-        
-        try:
-            print("[1/3] Building training graph...")
-            train_fn = train_builder(test_config)
-            jit_train_fn = jax.jit(train_fn)
-
-            print("[2/3] Compiling and running training loop (tracing JIT + BPTT)...")
-            rng = jax.random.PRNGKey(test_config["SEED"])
-            output = jit_train_fn(rng)
-
-            print("[3/3] Inspecting execution artifacts and loss values...")
-            runner_state = output["runner_state"]
-            metrics = output["metrics"]
-
-            # Pull metrics to host
-            metrics_np = jax.tree_util.tree_map(lambda x: np.array(x), metrics)
-
-            total_loss = metrics_np["losses/total_loss"]
-            actor_loss = metrics_np["losses/actor_loss"]
-            critic_loss = metrics_np["losses/critic_loss"]
-            
-            # loc_loss only exists in recurrent ablations
-            loc_loss = metrics_np.get("losses/loc_loss", None)
-
-            print(f"\n--- Metric Summary Across Updates ({algo_name}) ---")
-            for i in range(len(total_loss)):
-                loc_str = f" | Loc = {loc_loss[i]:.4f}" if loc_loss is not None else ""
-                print(
-                    f"Update {i+1}: "
-                    f"Total Loss = {total_loss[i]:.4f} | "
-                    f"Actor = {actor_loss[i]:.4f} | "
-                    f"Critic = {critic_loss[i]:.4f}{loc_str}"
-                )
-
-            # Sanity Assertions
-            assert not np.isnan(total_loss).any(), f"[{algo_name}] Assertion failed: NaN detected in total_loss"
-            assert not np.isinf(total_loss).any(), f"[{algo_name}] Assertion failed: Inf detected in total_loss"
-            assert not np.isnan(critic_loss).any(), f"[{algo_name}] Assertion failed: NaN detected in critic_loss"
-            if loc_loss is not None:
-                assert not np.isnan(loc_loss).any(), f"[{algo_name}] Assertion failed: NaN detected in loc_loss"
-
-            # Verify agent state params updated
-            trained_params = runner_state[0].params
-            assert trained_params is not None, f"[{algo_name}] Assertion failed: Network params are None"
-            
-            print(f"\n✅ {algo_name.split()[0]} PASSED")
-            
-        except Exception as e:
-            print(f"\n❌ {algo_name.split()[0]} FAILED: {str(e)}")
-            import traceback
-            traceback.print_exc()
-
-    print("\n" + "=" * 80)
-    print("ALL ABLATION SMOKE TESTS FINISHED.")
+def check_env(cfg):
+    """Verify map-size inference and that normalized positions are sane."""
     print("=" * 80)
+    print("Environment check (map size inference + normalized positions)")
+    print("=" * 80)
+    env = Environment(
+        env_name=cfg["ENV_NAME"], n_agents=cfg["N_AGENTS"], n_envs=cfg["N_ENVS"],
+        common_reward=cfg["COMMON_REWARD"], reputation=False, seed=cfg["SEED"],
+    )
+    obs, (state, _), _ = env.initialize(jax.random.PRNGKey(0))
+    locs = np.array(state.agent_locs)
+    xy = np.array(env.extract_normalized_xy(state))
+
+    print(f"obs shape        : {obs.shape}")
+    print(f"state.grid shape : {state.grid.shape}")
+    print(f"inferred map_h/w : {env.map_h}, {env.map_w}")
+    print(f"agent_locs rows  : [{locs[..., 0].min()}, {locs[..., 0].max()}]")
+    print(f"agent_locs cols  : [{locs[..., 1].min()}, {locs[..., 1].max()}]")
+    print(f"normalized xy    : min={xy.min(0)}, max={xy.max(0)}, shape={xy.shape}")
+
+    assert isinstance(env.map_h, int) or np.issubdtype(type(env.map_h), np.integer), "map_h not an int"
+    assert xy.shape == (cfg["N_ENVS"] * cfg["N_AGENTS"], 2), "unexpected xy shape"
+    assert np.isfinite(xy).all(), "non-finite normalized positions"
+    assert xy.min() >= 0.0 and xy.max() <= 1.0, (
+        "normalized positions fall outside [0,1]: map size is wrong or the grid is padded "
+        "(set MAP_H/MAP_W and subtract the padding offset)"
+    )
+    # Heuristic only: spawns are random, so the max over 20+ agents should not be tiny.
+    if xy.max() < 0.5:
+        print("WARNING: all positions < 0.5. The grid is probably padded; targets will not span [0,1].")
+    print("env check OK\n")
+
+
+def run_case(name, builder, overrides, base_cfg):
+    cfg = {**base_cfg, **overrides}
+    print("=" * 80)
+    print(f"Testing: {name}")
+    print("=" * 80)
+
+    train_fn = builder(cfg)
+    output = jax.jit(train_fn)(jax.random.PRNGKey(cfg["SEED"]))
+    metrics = jax.tree_util.tree_map(np.array, output["metrics"])
+    params = output["runner_state"][0].params
+
+    for i in range(len(metrics["losses/total_loss"])):
+        pos = f" | Pos = {metrics['losses/pos_loss'][i]:.4f}" if "losses/pos_loss" in metrics else ""
+        print(
+            f"Update {i + 1}: Total = {metrics['losses/total_loss'][i]:.4f} | "
+            f"Actor = {metrics['losses/actor_loss'][i]:.4f} | "
+            f"Critic = {metrics['losses/critic_loss'][i]:.4f}{pos}"
+        )
+
+    for k in ("losses/total_loss", "losses/actor_loss", "losses/critic_loss"):
+        assert np.isfinite(metrics[k]).all(), f"non-finite {k}"
+    assert all(np.isfinite(np.array(l)).all() for l in jax.tree_util.tree_leaves(params)), "non-finite params"
+
+    n_leaves = len(jax.tree_util.tree_leaves(params))
+    if overrides.get("_kind") == "ff":
+        assert "losses/pos_loss" not in metrics, "feedforward MAPPO should not log pos_loss"
+    elif overrides["PREDICT_POS"]:
+        pl = metrics["losses/pos_loss"]
+        assert np.isfinite(pl).all(), "non-finite pos_loss"
+        assert (pl > 0).all(), "pos_loss is zero with PREDICT_POS=True (head not wired in?)"
+        assert (pl < 1.0).all(), "pos_loss >= 1 means predictions are off-scale (targets outside [0,1]?)"
+    else:
+        assert (metrics["losses/pos_loss"] == 0).all(), "pos_loss should be exactly 0 with PREDICT_POS=False"
+
+    print(f"PASSED ({n_leaves} param leaves)\n")
+    return n_leaves
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--env", default="clean_up")
+    ap.add_argument("--n_agents", type=int, default=7)
+    args = ap.parse_args()
+
+    print(f"JAX backend: {jax.default_backend()} | Devices: {jax.devices()}\n")
+    base_cfg = make_config(args.env, args.n_agents)
+
+    results = {}
+    try:
+        check_env(base_cfg)
+        results["env check"] = True
+    except Exception:
+        traceback.print_exc()
+        results["env check"] = False
+
+    cases = [
+        ("MAPPO", make_train_MAPPO, {"ALGO": "MAPPO", "PREDICT_POS": False, "_kind": "ff"}),
+        ("RecurrentMAPPO", make_train_recurrent, {"ALGO": "RecurrentMAPPO", "PREDICT_POS": False}),
+        ("RecurrentMAPPO+pos", make_train_recurrent, {"ALGO": "RecurrentMAPPO", "PREDICT_POS": True}),
+    ]
+    leaves = {}
+    for name, builder, overrides in cases:
+        try:
+            leaves[name] = run_case(name, builder, overrides, base_cfg)
+            results[name] = True
+        except Exception:
+            traceback.print_exc()
+            results[name] = False
+
+    if "RecurrentMAPPO" in leaves and "RecurrentMAPPO+pos" in leaves:
+        ok = leaves["RecurrentMAPPO+pos"] > leaves["RecurrentMAPPO"]
+        print(f"Position head adds parameters: {ok}")
+        results["pos head present"] = ok
+
+    print("=" * 80)
+    for k, v in results.items():
+        print(f"{'PASS' if v else 'FAIL'}  {k}")
+    print("=" * 80)
+    sys.exit(0 if all(results.values()) else 1)
 
 
 if __name__ == "__main__":
-    run_smoke_test()
+    main()

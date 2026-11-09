@@ -2,6 +2,8 @@ import socialjax as sj
 import jax 
 import jax.numpy as jnp
 
+from typing import Any
+
 class Environment:
     def __init__(
             self,
@@ -12,7 +14,9 @@ class Environment:
             reputation: bool=True,
             decay_coef: float=0.9,
             own_pos: tuple[int, int]=(9,5),
-            seed: int=30
+            seed: int=30,
+            map_h: None | int = None,
+            map_w: None | int = None,
             ):
         """Wrapper class to interact with a specific SocialJax environment"""
         self.env = sj.make(env_id=env_name, num_agents=n_agents, shared_rewards=False)
@@ -28,7 +32,7 @@ class Environment:
         self.obs_space = self.env.observation_space()[0].shape                           # type: ignore
         self.own_pos = own_pos
         self.add_rep = self.make_reputation_channel(n_agents=self.n_agents, view_hw=self.obs_space[:2], own_pos=own_pos)
-
+        self.map_h, self.map_w = map_h, map_w
     def _stack(self, x):
         if isinstance(x, dict):
             if self.agents[0] in x:
@@ -62,6 +66,10 @@ class Environment:
 
         obs, state = self.batch_reset(reset_keys)
         obs = self._stack(obs)
+
+        if self.map_h is None or self.map_w is None:
+            # grid shape is static, so this is safe under jit/scan
+            self.map_h, self.map_w = state.grid.shape[-2:]
         
         rep = jnp.zeros((self.n_envs, self.n_agents))
         if self.reputation:
@@ -95,6 +103,19 @@ class Environment:
         if self.common_reward:
             return obs, (env_state, rep), _common_reward(reward), done, info
         return obs, (env_state, rep), reward, done, info
+
+    def extract_normalized_xy(self, env_state: Any) -> jnp.ndarray:
+        """
+        Extracts normalized (row, col) coordinates in [0, 1]^2 for all agents.
+        Returns shape: (n_envs * n_agents, 2)
+        """
+        assert self.map_h is not None and self.map_w is not None, "You must make sure that the map_h and map_w are set to an integer value, not None"
+        raw_coords = env_state.agent_locs[:, :, :2].astype(jnp.float32)
+        scale = jnp.array(
+            [jnp.maximum(self.map_h - 1.0, 1.0), jnp.maximum(self.map_w - 1.0, 1.0)],
+            dtype=jnp.float32,
+        )
+        return (raw_coords / scale).reshape((self.n_envs * self.n_agents, 2))
 
     def make_reputation_channel(self, n_agents, view_hw, own_pos):
         H, W = view_hw

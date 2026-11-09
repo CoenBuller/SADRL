@@ -20,6 +20,7 @@ class Transition(NamedTuple):
     log_prob: jnp.ndarray
     actor_obs: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]
     world_state: jnp.ndarray
+    position: jnp.ndarray
     info: Any
 
 
@@ -33,6 +34,8 @@ def make_train_recurrent(config):
         reputation=config["REPUTATION"],
         own_pos=tuple(config["OWN_POS"]),
         decay_coef=config["REP_DECAY"],
+        map_h=config["MAP_H"],
+        map_w=config["MAP_W"],
     )
 
     num_agents = env.n_agents
@@ -49,6 +52,7 @@ def make_train_recurrent(config):
             hidden_dim=config["HIDDEN_DIM"],
             small=config["SMALL"],
             activation=config["ACTIVATION"],
+            predict_pos=config["PREDICT_POS"],
         )
 
         rng, _rng = jax.random.split(rng)
@@ -98,7 +102,13 @@ def make_train_recurrent(config):
             actor_obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], actor_obs)
             world_batch_t = world_batch[None, ...]
 
-            new_hidden, pi, value_seq = network.apply(
+            # Position target belongs to the pre-step state that produced last_obs
+            if config["PREDICT_POS"]:
+                position = env.extract_normalized_xy(env_state)  # (batch_size, 2)
+            else:
+                position = jnp.zeros((batch_size, 2), dtype=jnp.float32)
+
+            new_hidden, pi, value_seq, _ = network.apply(
                 agent_state.params, hidden, actor_obs_t, world_batch_t
             )  # type: ignore
 
@@ -129,6 +139,7 @@ def make_train_recurrent(config):
                 log_prob=log_prob,
                 actor_obs=actor_obs,
                 world_state=world_batch,
+                position=position,
                 info=info,
             )
 
@@ -177,7 +188,7 @@ def make_train_recurrent(config):
             actor_obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], actor_obs)
             last_world_t = last_world_batch[None, ...]
 
-            _, _, last_val_seq = network.apply(
+            _, _, last_val_seq, _ = network.apply(
                 agent_state.params, hidden, actor_obs_t, last_world_t
             )  # type: ignore
             last_val = last_val_seq.squeeze(0)
@@ -206,7 +217,7 @@ def make_train_recurrent(config):
                     init_hstate_mb, traj_batch, advantages, targets = batch_info
 
                     def _actor_loss_fn(params, init_hstate_mb, traj_batch, gae):
-                        _, pi, _ = network.apply(
+                        _, pi, _, pos_pred = network.apply(
                             params,
                             init_hstate_mb,
                             traj_batch.actor_obs,
@@ -223,10 +234,20 @@ def make_train_recurrent(config):
                         entropy = pi.entropy().mean()
                         approx_kl = ((ratio - 1.0) - logratio).mean()
 
-                        return loss_actor - config["ENT_COEF"] * entropy, (loss_actor, entropy, approx_kl)
+                        if config["PREDICT_POS"]:
+                            pos_loss = jnp.square(pos_pred - traj_batch.position).mean()
+                        else:
+                            pos_loss = jnp.zeros(())
+
+                        total = (
+                            loss_actor
+                            - config["ENT_COEF"] * entropy
+                            + config["POS_COEF"] * pos_loss
+                        )
+                        return total, (loss_actor, entropy, approx_kl, pos_loss)
 
                     def _critic_loss_fn(params, init_hstate_mb, traj_batch, targets):
-                        _, _, value = network.apply(
+                        _, _, value, _ = network.apply(
                             params,
                             init_hstate_mb,
                             traj_batch.actor_obs,
@@ -240,7 +261,7 @@ def make_train_recurrent(config):
                         loss_critic = 0.5 * jnp.maximum(value_losses, value_losses_clipped).mean()
                         return config["VF_COEF"] * loss_critic, loss_critic
 
-                    (actor_total, (loss_actor, entropy, approx_kl)), actor_grads = jax.value_and_grad(
+                    (actor_total, (loss_actor, entropy, approx_kl, pos_loss)), actor_grads = jax.value_and_grad(
                         _actor_loss_fn, has_aux=True
                     )(agent_state.params, init_hstate_mb, traj_batch, advantages)
 
@@ -255,7 +276,7 @@ def make_train_recurrent(config):
 
                     agent_state = agent_state.apply_gradients(grads=combined_grads)
                     total_loss = actor_total + critic_total
-                    return agent_state, (total_loss, (loss_actor, loss_critic, entropy, approx_kl))
+                    return agent_state, (total_loss, (loss_actor, loss_critic, entropy, approx_kl, pos_loss))
 
                 agent_state, init_hstate, traj_batch, advantages, targets, rng = update_state
                 rng, _rng = jax.random.split(rng)
@@ -292,7 +313,7 @@ def make_train_recurrent(config):
             update_state, loss_info = jax.lax.scan(_update_epoch, update_state, None, config["UPDATE_EPOCHS"])
             agent_state = update_state[0]
 
-            total_loss, (loss_actor, loss_critic, entropy, approx_kl) = loss_info
+            total_loss, (loss_actor, loss_critic, entropy, approx_kl, pos_loss) = loss_info
 
             finished_returns = traj_batch.info["finished_ep_returns"]
             num_done = jnp.maximum(traj_batch.done.sum(), 1.0)
@@ -319,6 +340,7 @@ def make_train_recurrent(config):
                 "losses/critic_loss": loss_critic.mean(),
                 "losses/entropy": entropy.mean(),
                 "losses/approx_kl": approx_kl.mean(),
+                "losses/pos_loss": pos_loss.mean(),
             }
 
             if isinstance(traj_batch.info, dict):

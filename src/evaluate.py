@@ -36,6 +36,7 @@ def make_gif(params, config, num_frames=1000, out_dir="evaluation"):
             hidden_dim=config["HIDDEN_DIM"],
             small=config["SMALL"],
             activation=config["ACTIVATION"],
+            predict_pos=config.get("PREDICT_POS", False),  # must match training, or params won't fit
         )
     else:
         raise ValueError(f"Unknown ALGO in evaluate: {algo}")
@@ -57,7 +58,7 @@ def make_gif(params, config, num_frames=1000, out_dir="evaluation"):
         elif algo == "RecurrentMAPPO":
             actor_obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], (obs_batch, last_done, last_action))
             world_batch_t = world_batch[None, ...]
-            hidden, pi, _ = network.apply(params, hidden, actor_obs_t, world_batch_t)
+            hidden, pi, _, _ = network.apply(params, hidden, actor_obs_t, world_batch_t)
             action = pi.sample(seed=k_act).squeeze(0)
 
         actions_env = action.reshape((1, num_agents))
@@ -66,7 +67,8 @@ def make_gif(params, config, num_frames=1000, out_dir="evaluation"):
         last_done = done.reshape((num_agents,)).astype(jnp.float32)
 
     Path(out_dir).mkdir(parents=True, exist_ok=True)
-    path = f"{out_dir}/{config['ALGO']}_{config['ENV_NAME']}_{num_agents}agents_seed{config['SEED']}_{config['REPUTATION']}.gif"
+    pos_tag = "_pos" if config.get("PREDICT_POS", False) else ""
+    path = f"{out_dir}/{config['ALGO']}_{config['ENV_NAME']}_{num_agents}agents_seed{config['SEED']}_{config['REPUTATION']}{pos_tag}.gif"
     imgs = [Image.fromarray(np.array(f)) for f in frames]
     imgs[0].save(path, format="GIF", save_all=True, append_images=imgs[1:], duration=200, loop=0)
 
