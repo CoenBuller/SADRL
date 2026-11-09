@@ -16,9 +16,9 @@ cd "$(dirname "$0")"
 
 CONFIG="${CONFIG:-experiments/recurrent.yaml}"
 ENV_NAME="${ENV_NAME:-clean_up}"
-SEEDS="${SEEDS:-30 31}"
+SEEDS="${SEEDS:-30 31 32}"
 VARIANTS="${VARIANTS:-MAPPO:false RecurrentMAPPO:false RecurrentMAPPO:true}"
-WANDB="${WANDB:-false}"
+WANDB="${WANDB:-true}"
 TOTAL_TIMESTEPS="${TOTAL_TIMESTEPS:-}"   # empty = use the value from the YAML
 PARALLEL="${PARALLEL:-0}"
 SMOKE="${SMOKE:-0}"
