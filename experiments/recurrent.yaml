@@ -25,9 +25,9 @@ POS_COEF: 0.5               # MSE on [0,1]^2 is ~0.08 at chance, so 0.1 is a ver
 MAP_H: null                 # null = infer from env state
 MAP_W: null
 
-# Optimization loop (4 * 7 * 100 = 2800 samples / 4 minibatches = 700 samples/minibatch)
-UPDATE_EPOCHS: 4
-NUM_MINIBATCHES: 4          # must divide N_ENVS * N_AGENTS (28)
+# Optimization loop (10 * 7 * 100 = 2800 samples / 4 minibatches = 700 samples/minibatch)
+UPDATE_EPOCHS: 2
+NUM_MINIBATCHES: 10          # must divide N_ENVS * N_AGENTS (28)
 
 # Optimizer
 MAX_GRAD_NORM: 0.5
