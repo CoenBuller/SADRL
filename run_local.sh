@@ -25,6 +25,7 @@ SMOKE="${SMOKE:-0}"
 LOG_DIR="${LOG_DIR:-local_logs}"
 PYTHON="${PYTHON:-python}"
 N_AGENTS="${N_AGENTS:-7}"
+NUM_STEPS="${NUM_STEPS:-}"              # empty = use the value from the YAML
 
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 export PYTHONUNBUFFERED=1
@@ -45,6 +46,7 @@ run_one() {
     local log="$LOG_DIR/${name}.log"
     local extra=()
     [ -n "$TOTAL_TIMESTEPS" ] && extra+=(--total_timesteps "$TOTAL_TIMESTEPS")
+    [ -n "$NUM_STEPS" ] && extra+=(--num_steps "$NUM_STEPS")
 
     echo "[$(date +%H:%M:%S)] START $name -> $log"
     uv run main.py --config "$CONFIG" --algo "$algo" --predict_pos "$pos" \
