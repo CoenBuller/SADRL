@@ -30,10 +30,11 @@ class Config:
     HIDDEN_DIM: int = 32
 
     # RNN settings
-    RNN_WARMUP: int = 10    # If using RNN network and prediction features over the recurrent steps, we let it warm up for 's' steps 
-    WINDOW: int = 30        # RNN looks over a window of 30 steps
+    RNN_WARMUP: int = 10        # If using RNN network and prediction features over the recurrent steps, we let it warm up for 's' steps 
+    WINDOW: int = 30            # RNN looks over a window of 30 steps
     PREDICT_POS: bool = False   # auxiliary absolute-position prediction from RNN output
     POS_COEF: float = 0.1
+    LSTM: bool = False          # If True, use an LSTM. Default to GRU otherwise.
 
     # Optimization loop
     UPDATE_EPOCHS: int = 10

@@ -1,2 +1,0 @@
-pd-arena:
-    - rollout lengths are 50. Might need to retry with smaller rollout lengths.

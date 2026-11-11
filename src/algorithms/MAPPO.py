@@ -8,7 +8,7 @@ from flax.training.train_state import TrainState
 
 from src.networks.networks2 import MAPPOAC
 from src.environments.env_wrapper import Environment
-
+from src.algorithms.utils import make_world_state
 
 class Transition(NamedTuple):
     done: jnp.ndarray
@@ -19,12 +19,6 @@ class Transition(NamedTuple):
     log_prob: jnp.ndarray
     obs: tuple[jnp.ndarray, jnp.ndarray]
     info: Any
-
-
-def make_world_state(obs: jnp.ndarray, num_envs: int, num_agents: int) -> jnp.ndarray:
-    h, w, c = obs.shape[2:]
-    joint_obs = jnp.transpose(obs, (0, 2, 3, 1, 4)).reshape((num_envs, h, w, num_agents * c))
-    return jnp.repeat(joint_obs, num_agents, axis=0)
 
 
 def make_train_MAPPO(config):

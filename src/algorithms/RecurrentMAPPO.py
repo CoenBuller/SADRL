@@ -6,7 +6,7 @@ import wandb
 from typing import Any, NamedTuple
 from flax.training.train_state import TrainState
 
-from src.networks.networks2 import RecurrentMAPPOAC, LSTM
+from src.networks.networks2 import RecurrentMAPPOAC, LSTM, GRU
 from src.algorithms.MAPPO import make_world_state
 from src.environments.env_wrapper import Environment
 
@@ -56,7 +56,10 @@ def make_train_recurrent(config):
         )
 
         rng, _rng = jax.random.split(rng)
-        init_hidden = LSTM.initialize_carry(batch_size, config["HIDDEN_DIM"])
+        if config["LSTM"]:
+            init_hidden = LSTM.initialize_carry(batch_size, config["HIDDEN_DIM"])
+        else:
+            init_hidden = GRU.initialize_carry(batch_size, config["HIDDEN_DIM"])
 
         init_actor_obs = (
             jnp.zeros((1, batch_size, *obs.shape[2:])),
@@ -109,13 +112,13 @@ def make_train_recurrent(config):
             else:
                 position = jnp.zeros((batch_size, 2), dtype=jnp.float32)
 
-            new_hidden, pi, value_seq, _ = network.apply(
+            new_hidden, pi, value_seq, _ = network.apply(                    # type: ignore       
                 agent_state.params, hidden, actor_obs_t, world_batch_t
             )  # type: ignore
 
-            action_seq = pi.sample(seed=_rng_action)
+            action_seq = pi.sample(seed=_rng_action)                         # type: ignore
             action = action_seq.squeeze(0)
-            log_prob = pi.log_prob(action_seq).squeeze(0)
+            log_prob = pi.log_prob(action_seq).squeeze(0)                    # type: ignore
             value = value_seq.squeeze(0)
 
             actions_per_env = action.reshape((num_envs, num_agents))
@@ -180,7 +183,7 @@ def make_train_recurrent(config):
             ) = runner_state
 
             last_obs_batch = last_obs.reshape((batch_size, *last_obs.shape[2:]))  # type: ignore
-            last_world_batch = make_world_state(last_obs, num_envs, num_agents)
+            last_world_batch = make_world_state(last_obs, num_envs, num_agents)   # type: ignore  
 
             actor_obs = (
                 last_obs_batch,
@@ -190,7 +193,7 @@ def make_train_recurrent(config):
             actor_obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], actor_obs)
             last_world_t = last_world_batch[None, ...]
 
-            _, _, last_val_seq, _ = network.apply(
+            _, _, last_val_seq, _ = network.apply(                                # type: ignore
                 agent_state.params, hidden, actor_obs_t, last_world_t
             )  # type: ignore
             last_val = last_val_seq.squeeze(0)
@@ -219,13 +222,13 @@ def make_train_recurrent(config):
                     init_hstate_mb, traj_batch, advantages, targets = batch_info
 
                     def _actor_loss_fn(params, init_hstate_mb, traj_batch, gae):
-                        _, pi, _, pos_pred = network.apply(
+                        _, pi, _, pos_pred = network.apply(                     # type: ignore
                             params,
                             init_hstate_mb,
                             traj_batch.actor_obs,
                             traj_batch.world_state,
                         )  # type: ignore
-                        log_prob = pi.log_prob(traj_batch.action)
+                        log_prob = pi.log_prob(traj_batch.action)               # type: ignore
                         logratio = log_prob - traj_batch.log_prob
                         ratio = jnp.exp(logratio)
 
@@ -233,7 +236,7 @@ def make_train_recurrent(config):
                         loss_actor1 = ratio * gae
                         loss_actor2 = jnp.clip(ratio, 1.0 - config["CLIP_EPS"], 1.0 + config["CLIP_EPS"]) * gae
                         loss_actor = -jnp.minimum(loss_actor1, loss_actor2).mean()
-                        entropy = pi.entropy().mean()
+                        entropy = pi.entropy().mean()                           # type: ignore
                         approx_kl = ((ratio - 1.0) - logratio).mean()
 
                         if config["PREDICT_POS"]:
@@ -249,8 +252,8 @@ def make_train_recurrent(config):
                         return total, (loss_actor, entropy, approx_kl, pos_loss)
 
                     def _critic_loss_fn(params, init_hstate_mb, traj_batch, targets):
-                        _, _, value, _ = network.apply(
-                            params,
+                        _, _, value, _ = network.apply(                         # type: ignore
+                            params,     
                             init_hstate_mb,
                             traj_batch.actor_obs,
                             traj_batch.world_state,
@@ -368,7 +371,10 @@ def make_train_recurrent(config):
             return runner_state, metrics
 
         rng, _rng = jax.random.split(rng)
-        init_hidden = LSTM.initialize_carry(batch_size, config["HIDDEN_DIM"])
+        if config["LSTM"]:
+            init_hidden = LSTM.initialize_carry(batch_size, config["HIDDEN_DIM"])
+        else:
+            init_hidden = GRU.initialize_carry(batch_size, config["HIDDEN_DIM"])
         init_last_action = jnp.zeros((num_envs, num_agents), dtype=jnp.int32)
         init_last_done = jnp.ones((batch_size,), dtype=jnp.float32)
         init_ep_returns = jnp.zeros((batch_size,), dtype=jnp.float32)
