@@ -2,11 +2,9 @@
 
 # ================= Configuration =================
 REPO_URL="git@github.com:CoenBuller/SADRL.git" 
-# Set this to the absolute local path to avoid confusion
 REPO_DIR="/local/s2631415/SADRL"
+LOG_FILE="active_deployments.log"
 
-# Define the exact parameters for each node's experiment.
-# (Changed inner single quotes to escaped double quotes to prevent tmux parsing errors)
 EXPERIMENTS=(
     "SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:true:true\" ENV_NAME=clean_up N_AGENTS=7 NUM_STEPS=100"
     "SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:false:true\" ENV_NAME=clean_up N_AGENTS=7 NUM_STEPS=100"
@@ -15,24 +13,27 @@ EXPERIMENTS=(
     "SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:true:true\" ENV_NAME=pd_arena N_AGENTS=4 NUM_STEPS=25"
     "SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:false:true\" ENV_NAME=pd_arena N_AGENTS=4 NUM_STEPS=25"
 )
+
 PREFIX="00650"
 # =================================================
 
-# Generate node list
 NODES=()
 for i in {0..100}; do
     NODES+=("$(printf "%s%02d" "$PREFIX" "$i")")
 done
 
 echo "Starting deployment of ${#EXPERIMENTS[@]} experiments..."
+echo "Logging successful deployments to: $LOG_FILE"
+echo "-------------------------------------------------" > "$LOG_FILE"
+echo "Deployment Run: $(date)" >> "$LOG_FILE"
+echo "-------------------------------------------------" >> "$LOG_FILE"
+
 printf "%-15s | %s\n" "NODE" "ACTION"
 printf "%-15s-+-%s\n" "----------------" "---------------------------------------"
 
 EXP_IDX=0
 NODE_IDX=0
 TOTAL_NODES=${#NODES[@]}
-
-# Array to keep track of what is running where
 DEPLOYED_LOG=()
 
 while [ $EXP_IDX -lt ${#EXPERIMENTS[@]} ]; do
@@ -46,7 +47,6 @@ while [ $EXP_IDX -lt ${#EXPERIMENTS[@]} ]; do
     NODE="${NODES[$NODE_IDX]}"
     EXP_PARAMS="${EXPERIMENTS[$EXP_IDX]}"
     
-    # 1. Check if the node is clear
     ssh -q -T -o LogLevel=QUIET -o BatchMode=yes -o ConnectTimeout=5 "$NODE" '
         REMOTE_USER=$(whoami)
         OTHER_USERS=$(who | awk "{print \$1}" | sort -u | grep -v "^${REMOTE_USER}$" | wc -l)
@@ -62,11 +62,9 @@ while [ $EXP_IDX -lt ${#EXPERIMENTS[@]} ]; do
     
     STATUS=$?
 
-    # 2. Deploy if clear
     if [ $STATUS -eq 0 ]; then
         printf "%-15s | \e[32m[DEPLOYING]\e[0m Experiment $((EXP_IDX+1)) -> %s\n" "$NODE" "$EXP_PARAMS"
         
-        # Using double quotes for the SSH string so local variables like $REPO_DIR expand before sending
         ssh -q -T -o BatchMode=yes "$NODE" "
             mkdir -p /local/s2631415 && chmod 700 /local/s2631415
 
@@ -82,8 +80,9 @@ while [ $EXP_IDX -lt ${#EXPERIMENTS[@]} ]; do
             tmux new-session -d -s train 'source ~/.bashrc && $EXP_PARAMS ./run_local.sh'
         "
         
-        # Log the successful deployment
+        # Log to array for terminal summary, and write directly to file
         DEPLOYED_LOG+=("[$NODE] running: $EXP_PARAMS")
+        echo "[$NODE] running: $EXP_PARAMS" >> "$LOG_FILE"
         
         EXP_IDX=$((EXP_IDX + 1))
     fi
@@ -94,7 +93,7 @@ done
 echo ""
 echo "================================================="
 echo "All ${#EXPERIMENTS[@]} experiments successfully deployed!"
-echo "Deployment Summary:"
+echo "Deployment Summary (Saved to $LOG_FILE):"
 echo "-------------------------------------------------"
 for entry in "${DEPLOYED_LOG[@]}"; do
     echo "$entry"
