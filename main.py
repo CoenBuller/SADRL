@@ -12,15 +12,18 @@ from flax.serialization import to_bytes
 from src.config import Config
 from src.algorithms.IPPO import make_train_IPPO
 from src.algorithms.MAPPO import make_train_MAPPO
-from src.algorithms.RecurrentMAPPO import make_train_recurrent
+from src.algorithms.RecurrentMAPPO import make_train_recurrent as make_train_RecurrentMAPPO
+from src.algorithms.RecurrentIPPO import make_train_recurrent as make_train_RecurrentIPPO
 from src.evaluate import make_gif
 
 _BOOL = lambda x: (str(x).lower() in ["true", "1", "yes"])
 
 
 def make_tag(cfg: dict) -> str:
-    """Unique run tag. The position-prediction variant gets a suffix so it never overwrites the baseline."""
-    tag = f"{cfg['ALGO']}_{cfg['ENV_NAME']}_{cfg['SEED']}_rep_{cfg['REPUTATION']}"
+    """Unique run tag. Variants get suffixes so they never overwrite the baseline."""
+    tag = f"{cfg['ALGO']}_{cfg['ENV_NAME']}_{cfg['SEED']}"
+    if cfg.get("LSTM"):
+        tag += "_lstm"
     if cfg["PREDICT_POS"]:
         tag += "_pos"
     return tag
@@ -34,11 +37,12 @@ def main():
     p.add_argument("--num_steps", type=int, default=None)
     p.add_argument("--algo", type=str, default=None)
     p.add_argument("--rep", type=_BOOL, default=None)
-    p.add_argument("--predict_pos", type=_BOOL, default=None, help="Auxiliary position prediction (RecurrentMAPPO only)")
+    p.add_argument("--predict_pos", type=_BOOL, default=None, help="Auxiliary position prediction (RecurrentMAPPO/RecurrentIPPO only)")
     p.add_argument("--pos_coef", type=float, default=None)
     p.add_argument("--wandb", type=_BOOL, default=None)
     p.add_argument("--total_timesteps", type=int, default=None)
     p.add_argument("--n_agents", type=int, default=None)
+    p.add_argument("--lstm", type=_BOOL, default=None)
     args = p.parse_args()
 
     # 1. Load YAML overrides (if provided)
@@ -69,7 +73,8 @@ def main():
         cli_overrides["TOTAL_TIMESTEPS"] = args.total_timesteps
     if args.n_agents is not None:
         cli_overrides["N_AGENTS"] = args.n_agents
-    
+    if args.lstm is not None:
+        cli_overrides["LSTM"] = args.lstm
 
     # 3. Merge hierarchy: Config() -> YAML -> CLI
     merged_overrides = {**yaml_overrides, **cli_overrides}
@@ -84,10 +89,11 @@ def main():
     config_dict = dataclasses.asdict(raw_config)
 
     algo = config_dict["ALGO"]
-    if algo not in ("IPPO", "MAPPO", "RecurrentMAPPO"):
-        raise ValueError(f"Unknown ALGO: {algo}. Expected 'IPPO', 'MAPPO', or 'RecurrentMAPPO'.")
-    if config_dict["PREDICT_POS"] and algo != "RecurrentMAPPO":
-        raise ValueError(f"PREDICT_POS=True requires ALGO=RecurrentMAPPO (got {algo}).")
+    valid_algos = ("IPPO", "MAPPO", "RecurrentMAPPO", "RecurrentIPPO")
+    if algo not in valid_algos:
+        raise ValueError(f"Unknown ALGO: {algo}. Expected one of {valid_algos}.")
+    if config_dict["PREDICT_POS"] and algo not in ("RecurrentMAPPO", "RecurrentIPPO"):
+        raise ValueError(f"PREDICT_POS=True requires ALGO=RecurrentMAPPO or RecurrentIPPO (got {algo}).")
 
     tag = make_tag(config_dict)
 
@@ -109,8 +115,10 @@ def main():
         train_fn = make_train_IPPO(config_dict)
     elif algo == "MAPPO":
         train_fn = make_train_MAPPO(config_dict)
+    elif algo == "RecurrentIPPO":
+        train_fn = make_train_RecurrentIPPO(config_dict)
     else:
-        train_fn = make_train_recurrent(config_dict)
+        train_fn = make_train_RecurrentMAPPO(config_dict)
 
     jit_train_fn = jax.jit(train_fn)
 

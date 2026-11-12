@@ -53,6 +53,7 @@ def make_train_recurrent(config):
             small=config["SMALL"],
             activation=config["ACTIVATION"],
             predict_pos=config["PREDICT_POS"],
+            lstm=config["LSTM"]
         )
 
         rng, _rng = jax.random.split(rng)
@@ -288,9 +289,12 @@ def make_train_recurrent(config):
 
                 permutation = jax.random.permutation(_rng, batch_size)
 
-                shuffled_hstate = jnp.take(init_hstate, permutation, axis=0)
-                minibatches_hstate = jnp.reshape(
-                    shuffled_hstate, (config["NUM_MINIBATCHES"], -1, config["HIDDEN_DIM"])
+                shuffled_hstate = jax.tree_util.tree_map(
+                    lambda x: jnp.take(x, permutation, axis=0), init_hstate
+                )
+                minibatches_hstate = jax.tree_util.tree_map(
+                    lambda x: jnp.reshape(x, (config["NUM_MINIBATCHES"], -1, config["HIDDEN_DIM"])),
+                    shuffled_hstate,
                 )
 
                 seq_batch = (traj_batch._replace(info={}), advantages, targets)
