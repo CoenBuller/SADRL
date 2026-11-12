@@ -20,14 +20,14 @@ ENV_NAME="${ENV_NAME:-clean_up}"
 SEEDS="${SEEDS:-30 31 32}"
 VARIANTS="${VARIANTS:-MAPPO:false:false RecurrentMAPPO:false:false RecurrentMAPPO:true:false RecurrentIPPO:false:true RecurrentIPPO:true:true}"
 WANDB="${WANDB:-true}"
-TOTAL_TIMESTEPS="${TOTAL_TIMESTEPS:-}"   # empty = use the value from the YAML
+TOTAL_TIMESTEPS="${TOTAL_TIMESTEPS:-}"      # empty = use the value from the YAML
 PARALLEL="${PARALLEL:-0}"
 SMOKE="${SMOKE:-0}"
 LOG_DIR="${LOG_DIR:-local_logs}"
 PYTHON="${PYTHON:-python}"
 N_AGENTS="${N_AGENTS:-7}"
-NUM_STEPS="${NUM_STEPS:-}"              # empty = use the value from the YAML
-LSTM="${LSTM:-}"                        # global override; empty = use per-variant or YAML value
+NUM_STEPS="${NUM_STEPS:-}"                  # empty = use the value from the YAML
+LSTM="${LSTM:-}"                            # global override; empty = use per-variant or YAML value
 
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 export PYTHONUNBUFFERED=1
