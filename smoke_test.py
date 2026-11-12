@@ -1,8 +1,10 @@
 """
-Smoke test for the three runs in recurrent.slurm:
+Smoke test for the recurrent runs:
   1. MAPPO                       (feedforward)
-  2. RecurrentMAPPO              (no position prediction)
+  2. RecurrentMAPPO              (no position prediction, GRU default)
   3. RecurrentMAPPO + PREDICT_POS
+  4. RecurrentIPPO               (no position prediction, LSTM)
+  5. RecurrentIPPO + PREDICT_POS + LSTM
 
 Checks: env map-size inference + normalized positions in [0,1], JIT tracing,
 finite losses/params, and that pos_loss behaves as expected for each variant.
@@ -23,7 +25,8 @@ import jax
 import numpy as np
 
 from src.algorithms.MAPPO import make_train_MAPPO
-from src.algorithms.RecurrentMAPPO import make_train_recurrent
+from src.algorithms.RecurrentMAPPO import make_train_recurrent as make_train_recurrent_mappo
+from src.algorithms.RecurrentIPPO import make_train_recurrent as make_train_recurrent_ippo
 from src.environments.env_wrapper import Environment
 
 
@@ -44,9 +47,10 @@ def make_config(env_name, n_agents):
         "SMALL": True,
         "ACTIVATION": "relu",
         "HIDDEN_DIM": 16,
-        # Position prediction
+        # Position prediction & LSTM
         "PREDICT_POS": False,
         "POS_COEF": 0.5,
+        "LSTM": False,
         "MAP_H": None,
         "MAP_W": None,
         # Rollout / optimisation (batch = n_envs * n_agents must be divisible by NUM_MINIBATCHES)
@@ -159,9 +163,11 @@ def main():
         results["env check"] = False
 
     cases = [
-        ("MAPPO", make_train_MAPPO, {"ALGO": "MAPPO", "PREDICT_POS": False, "_kind": "ff"}),
-        ("RecurrentMAPPO", make_train_recurrent, {"ALGO": "RecurrentMAPPO", "PREDICT_POS": False}),
-        ("RecurrentMAPPO+pos", make_train_recurrent, {"ALGO": "RecurrentMAPPO", "PREDICT_POS": True}),
+        ("MAPPO", make_train_MAPPO, {"ALGO": "MAPPO", "PREDICT_POS": False, "LSTM": False, "_kind": "ff"}),
+        ("RecurrentMAPPO", make_train_recurrent_mappo, {"ALGO": "RecurrentMAPPO", "PREDICT_POS": False, "LSTM": False}),
+        ("RecurrentMAPPO+pos", make_train_recurrent_mappo, {"ALGO": "RecurrentMAPPO", "PREDICT_POS": True, "LSTM": False}),
+        ("RecurrentIPPO+LSTM", make_train_recurrent_ippo, {"ALGO": "RecurrentIPPO", "PREDICT_POS": False, "LSTM": True}),
+        ("RecurrentIPPO+pos+LSTM", make_train_recurrent_ippo, {"ALGO": "RecurrentIPPO", "PREDICT_POS": True, "LSTM": True}),
     ]
     leaves = {}
     for name, builder, overrides in cases:
@@ -174,8 +180,13 @@ def main():
 
     if "RecurrentMAPPO" in leaves and "RecurrentMAPPO+pos" in leaves:
         ok = leaves["RecurrentMAPPO+pos"] > leaves["RecurrentMAPPO"]
-        print(f"Position head adds parameters: {ok}")
-        results["pos head present"] = ok
+        print(f"MAPPO Position head adds parameters: {ok}")
+        results["mappo pos head present"] = ok
+
+    if "RecurrentIPPO+LSTM" in leaves and "RecurrentIPPO+pos+LSTM" in leaves:
+        ok = leaves["RecurrentIPPO+pos+LSTM"] > leaves["RecurrentIPPO+LSTM"]
+        print(f"IPPO Position head adds parameters: {ok}")
+        results["ippo pos head present"] = ok
 
     print("=" * 80)
     for k, v in results.items():
