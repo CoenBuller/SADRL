@@ -8,13 +8,13 @@ REPO_DIR="/local/s2631415/SADRL"
 # Define the exact parameters for each node's experiment.
 # (Changed inner single quotes to escaped double quotes to prevent tmux parsing errors)
 EXPERIMENTS=(
-    "SEEDS=30 VARIANTS=\"MAPPO:false:false\""
-    "SEEDS=31 VARIANTS=\"MAPPO:false:false\""
-    "SEEDS=32 VARIANTS=\"MAPPO:false:false\""
-    "SEEDS=33 VARIANTS=\"MAPPO:false:false\""
-    "SEEDS=34 VARIANTS=\"MAPPO:false:false\""
+    "SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:true:true\" ENV_NAME=clean_up N_AGENTS=7 NUM_STEPS=100"
+    "SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:false:true\" ENV_NAME=clean_up N_AGENTS=7 NUM_STEPS=100"
+    "SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:true:true\" ENV_NAME=gift N_AGENTS=5 NUM_STEPS=100"
+    "SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:false:true\" ENV_NAME=gift N_AGENTS=5 NUM_STEPS=100"
+    "SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:true:true\" ENV_NAME=pd_arena N_AGENTS=4 NUM_STEPS=25"
+    "SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:false:true\" ENV_NAME=pd_arena N_AGENTS=4 NUM_STEPS=25"
 )
-
 PREFIX="00650"
 # =================================================
 
