@@ -33,6 +33,19 @@ def make_gif(params, config, num_frames=1000, out_dir="evaluation"):
     if algo == "MAPPO":
         network = MAPPOAC(action_dim=action_dim, small=config["SMALL"], activation=config["ACTIVATION"])
         hidden = None
+
+        @jax.jit
+        def step_eval(params, hidden, obs, state, rep, last_done, last_action, rng):
+            rng, k_act, k_step = jax.random.split(rng, 3)
+            obs_batch = obs.reshape((num_agents, *obs.shape[2:]))
+            world_batch = make_world_state(obs, 1, num_agents)
+            pi, _ = network.apply(params, (obs_batch, world_batch))
+            action = pi.sample(seed=k_act)
+            actions_env = action.reshape((1, num_agents))
+            next_obs, (next_state, next_rep), _, done, _ = env.step(k_step, actions_env, (state, rep))
+            next_done = done.reshape((num_agents,)).astype(jnp.float32)
+            return hidden, next_obs, next_state, next_rep, next_done, action, rng
+
     elif algo == "RecurrentMAPPO":
         network = RecurrentMAPPOAC(
             action_dim=action_dim,
@@ -42,10 +55,26 @@ def make_gif(params, config, num_frames=1000, out_dir="evaluation"):
             predict_pos=predict_pos,
             lstm=use_lstm,
         )
-        if use_lstm:
-            hidden = LSTM.initialize_carry(num_agents, config["HIDDEN_DIM"])
-        else:
-            hidden = GRU.initialize_carry(num_agents, config["HIDDEN_DIM"])
+        hidden = (
+            LSTM.initialize_carry(num_agents, config["HIDDEN_DIM"])
+            if use_lstm
+            else GRU.initialize_carry(num_agents, config["HIDDEN_DIM"])
+        )
+
+        @jax.jit
+        def step_eval(params, hidden, obs, state, rep, last_done, last_action, rng):
+            rng, k_act, k_step = jax.random.split(rng, 3)
+            obs_batch = obs.reshape((num_agents, *obs.shape[2:]))
+            world_batch = make_world_state(obs, 1, num_agents)
+            actor_obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], (obs_batch, last_done, last_action))
+            world_batch_t = world_batch[None, ...]
+            new_hidden, pi, _, _ = network.apply(params, hidden, actor_obs_t, world_batch_t)
+            action = pi.sample(seed=k_act).squeeze(0)
+            actions_env = action.reshape((1, num_agents))
+            next_obs, (next_state, next_rep), _, done, _ = env.step(k_step, actions_env, (state, rep))
+            next_done = done.reshape((num_agents,)).astype(jnp.float32)
+            return new_hidden, next_obs, next_state, next_rep, next_done, action, rng
+
     elif algo == "RecurrentIPPO":
         network = RecurrentIPPOAC(
             action_dim=action_dim,
@@ -61,6 +90,18 @@ def make_gif(params, config, num_frames=1000, out_dir="evaluation"):
             init_hidden_a = GRU.initialize_carry(num_agents, config["HIDDEN_DIM"])
             init_hidden_c = GRU.initialize_carry(num_agents, config["HIDDEN_DIM"])
         hidden = (init_hidden_a, init_hidden_c)
+
+        @jax.jit
+        def step_eval(params, hidden, obs, state, rep, last_done, last_action, rng):
+            rng, k_act, k_step = jax.random.split(rng, 3)
+            obs_batch = obs.reshape((num_agents, *obs.shape[2:]))
+            obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], (obs_batch, last_done, last_action))
+            new_hidden, pi, _, _ = network.apply(params, hidden, obs_t)
+            action = pi.sample(seed=k_act).squeeze(0)
+            actions_env = action.reshape((1, num_agents))
+            next_obs, (next_state, next_rep), _, done, _ = env.step(k_step, actions_env, (state, rep))
+            next_done = done.reshape((num_agents,)).astype(jnp.float32)
+            return new_hidden, next_obs, next_state, next_rep, next_done, action, rng
     else:
         raise ValueError(f"Unknown ALGO in evaluate: {algo}")
 
@@ -70,34 +111,15 @@ def make_gif(params, config, num_frames=1000, out_dir="evaluation"):
     frames = []
     for _ in range(num_frames):
         frames.append(env.env.render(jax.tree_util.tree_map(lambda x: x[0], state)))
-        obs_batch = obs.reshape((num_agents, *obs.shape[2:]))  # type: ignore
-        rng, k_act, k_step = jax.random.split(rng, 3)
-
-        if algo == "MAPPO":
-            world_batch = make_world_state(obs, 1, num_agents)                                                      # type: ignore
-            pi, _ = network.apply(params, (obs_batch, world_batch))
-            action = pi.sample(seed=k_act)
-        elif algo == "RecurrentMAPPO":
-            world_batch = make_world_state(obs, 1, num_agents)                                                      # type: ignore
-            actor_obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], (obs_batch, last_done, last_action))
-            world_batch_t = world_batch[None, ...]                                                                  # type: ignore
-            hidden, pi, _, _ = network.apply(params, hidden, actor_obs_t, world_batch_t)                            # type: ignore
-            action = pi.sample(seed=k_act).squeeze(0)                                                               # type: ignore
-        elif algo == "RecurrentIPPO":
-            obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], (obs_batch, last_done, last_action))
-            hidden, pi, _, _ = network.apply(params, hidden, obs_t)                                                 # type: ignore
-            action = pi.sample(seed=k_act).squeeze(0)                                                               # type: ignore
-
-        actions_env = action.reshape((1, num_agents))                                                               # type: ignore
-        obs, (state, rep), _, done, _ = env.step(k_step, actions_env, (state, rep))
-        last_action = action                                                                                        # type: ignore
-        last_done = done.reshape((num_agents,)).astype(jnp.float32)                                                 # type: ignore
+        hidden, obs, state, rep, last_done, last_action, rng = step_eval(
+            params, hidden, obs, state, rep, last_done, last_action, rng
+        )
 
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     pos_tag = "_pos" if predict_pos else ""
     lstm_tag = "_lstm" if use_lstm else ""
     path = f"{out_dir}/{config['ALGO']}_{config['ENV_NAME']}_{num_agents}agents_seed{config['SEED']}_{config['REPUTATION']}{pos_tag}{lstm_tag}.gif"
-    
+
     imgs = [Image.fromarray(np.array(f)) for f in frames]
     imgs[0].save(path, format="GIF", save_all=True, append_images=imgs[1:], duration=200, loop=0)
 
