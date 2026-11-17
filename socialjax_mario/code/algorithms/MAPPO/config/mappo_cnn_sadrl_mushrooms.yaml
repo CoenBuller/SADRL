@@ -1,0 +1,22 @@
+# Round 17 (E.4, 2026-11-17): MAPPO on mushrooms with the Clean Up trainer (mappo_cnn_sadrl_mushrooms.py).
+# Rollout and network are passed on the command line (see slurm/batch_2026-11-17_round17_envs.sh).
+defaults:
+  - mappo_base
+
+"ENV_NAME": "mushrooms"
+"NUM_ENVS": 4
+"NUM_STEPS": 100
+"TOTAL_TIMESTEPS": 1e8
+"NUM_MINIBATCHES": 4
+
+"ENV_KWARGS":
+  "num_agents": 5  # as in SocialJax's mappo_cnn_mushrooms.yaml
+  "self_channel_fix": True  # fixed observation (upstream fb4ac0f)
+  "num_inner_steps": 1000
+  "shared_rewards": True
+  "cnn": True
+  "jit": True
+
+"REWARD": "MAPPO"
+"WANDB_TAGS":
+  - COMMON_REWARD

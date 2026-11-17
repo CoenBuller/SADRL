@@ -940,13 +940,14 @@ class Gift(MultiAgentEnv):
             new_bag = comsume_bag.transpose()
             state = state.replace(agents_bag=new_bag)
 
+            agent_rewards = rewards.reshape(-1).astype(jnp.float32)  # [SADRL fix 2026-11-17] round 17: raw per-agent reward in info (logging only; the training reward is unchanged)
             if self.shared_rewards:
                 rewards_sum_all_agents = jnp.zeros((self.num_agents, 1))
                 rewards = jnp.sum(rewards)
                 rewards_sum_all_agents += rewards
                 rewards = rewards_sum_all_agents
                 info = {
-                    "original_rewards": rewards.squeeze(),
+                    "original_rewards": agent_rewards,  # [SADRL fix 2026-11-17] was the team reward; now r_i, as in clean_up
                     "shaped_rewards": rewards.squeeze(),
                 }
             elif self.inequity_aversion:
@@ -1005,6 +1006,7 @@ class Gift(MultiAgentEnv):
                 info = {}
 
             info["give_actions"] = jnp.where(actions == Actions.zap_forward, 1, 0).squeeze()
+            info["agent_rewards"] = agent_rewards  # [SADRL fix 2026-11-17] round 17: raw per-agent reward in info (logging only; the training reward is unchanged)
             info["level_two_and_three_tokens"] = level_two_and_three_tokens.squeeze() * 10
 
             # if self.shared_rewards:

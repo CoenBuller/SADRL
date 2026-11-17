@@ -1,0 +1,12 @@
+# Round 17 (E.4, 2026-11-17): CC-MAPPO on pd_arena (research/cc_mappo), on top of mappo_cnn_sadrl_pd_arena.
+defaults:
+  - mappo_cnn_sadrl_pd_arena
+  - _self_
+
+CREDIT_MODE: loo_single   # coma | qret | loo | local | loo_single
+CREDIT_NORM: team
+CREDIT_GATE: none
+GATE_EFULL: 0.5
+GATE_BETA: 0.9
+METRIC_SCALE_KEYS: []
+REWARD: cc

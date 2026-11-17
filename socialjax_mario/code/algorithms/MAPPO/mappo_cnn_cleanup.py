@@ -9,6 +9,7 @@ import optax
 import flax.linen as nn
 from flax import traverse_util
 from flax.training.train_state import TrainState
+from algorithms.utils.env_roles import role_action  # [SADRL fix 2026-11-17] round 17 (E.4): per-env role action
 from gymnax.wrappers.purerl import LogWrapper
 import socialjax
 from socialjax.wrappers.baselines import MAPPOWorldStateWrapper, LogWrapper, SVOLogWrapper  # [SADRL fix 2026-10-18] SVOLogWrapper also logs the raw (pre-shaping) return
@@ -60,6 +61,7 @@ def actor_health(actor_network, actor_params, obs):
 
 def make_train(config):
     env = socialjax.make(config["ENV_NAME"], **config["ENV_KWARGS"])
+    role_id, role = role_action(config["ENV_NAME"])  # [SADRL fix 2026-11-17] round 17: any env (logging only)
     config["NUM_ACTORS"] = env.num_agents * config["NUM_ENVS"]
     config["NUM_UPDATES"] = (
         config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
@@ -430,8 +432,12 @@ def make_train(config):
             # high to low within the env, averaged over envs, scaled to one episode. rank0 = the top agent.
             # info is env-major: actor index = env * num_agents + agent.
             per_episode = config["ENV_KWARGS"]["num_inner_steps"] / config["NUM_STEPS"]
-            for key, name in (("agent_rewards", "reward"), ("clean_action_info", "clean")):
-                per_agent = traj_batch.info[key].reshape(config["NUM_STEPS"], config["NUM_ENVS"], env.num_agents).sum(0)
+            # [SADRL fix 2026-11-17] round 17: the role count comes from the actions in envs without clean_action_info
+            # (actions are agent-major, (T, agent * NUM_ENVS + env)); Clean Up keeps its info-based path and names.
+            T_, E_, N_ = config["NUM_STEPS"], config["NUM_ENVS"], env.num_agents
+            role_counts = (traj_batch.info["clean_action_info"].reshape(T_, E_, N_).sum(0) if "clean_action_info" in traj_batch.info
+                           else jnp.transpose((traj_batch.action == role_id).reshape(T_, N_, E_).sum(0), (1, 0)))
+            for name, per_agent in (("reward", traj_batch.info["agent_rewards"].reshape(T_, E_, N_).sum(0)), (role, role_counts)):
                 ranked = -jnp.sort(-per_agent, axis=1).mean(0) * per_episode
                 by_id = per_agent.mean(0) * per_episode  # [SADRL fix 2026-11-05] per agent id, unsorted (round 13, L.2)
                 for k in range(env.num_agents):
@@ -448,7 +454,8 @@ def make_train(config):
             metric = jax.tree.map(lambda x: x.mean(), metric)
             metric["update_steps"] = update_steps
             metric["env_step"] = update_steps * config["NUM_STEPS"] * config["NUM_ENVS"]
-            metric["clean_action_info"] = metric["clean_action_info"] * config["ENV_KWARGS"]["num_inner_steps"]
+            if "clean_action_info" in metric:  # [SADRL fix 2026-11-17] Clean Up only
+                metric["clean_action_info"] = metric["clean_action_info"] * config["ENV_KWARGS"]["num_inner_steps"]
 
             # jax.experimental.io_callback(callback, None, metric)
 

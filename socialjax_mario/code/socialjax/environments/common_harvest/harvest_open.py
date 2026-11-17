@@ -1185,6 +1185,7 @@ class Harvest_open(MultiAgentEnv):
             )
             state = state.replace(reborn_locs=new_re_locs)
 
+            agent_rewards = jnp.where(apple_matches, 1, 0).reshape(-1).astype(jnp.float32)  # [SADRL fix 2026-11-17] round 17: raw per-agent reward in info (logging only; the training reward is unchanged)
             if self.shared_rewards:
                 rewards = jnp.zeros((self.num_agents, 1))
                 original_rewards = jnp.where(apple_matches, 1, rewards)
@@ -1253,6 +1254,7 @@ class Harvest_open(MultiAgentEnv):
             
             AppleCount = jnp.sum(state.grid == Items.apple)
             info["AppleCount_info"] = jnp.zeros((self.num_agents, 1)).squeeze() + AppleCount
+            info["agent_rewards"] = agent_rewards  # [SADRL fix 2026-11-17] round 17: raw per-agent reward in info (logging only; the training reward is unchanged)
             
             
             state_nxt = State(

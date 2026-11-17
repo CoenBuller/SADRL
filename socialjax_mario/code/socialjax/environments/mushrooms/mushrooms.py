@@ -1099,6 +1099,7 @@ class Mushrooms(MultiAgentEnv):
             )
             state = state.replace(reborn_locs=new_re_locs)
 
+            agent_rewards = rewards.reshape(-1).astype(jnp.float32)  # [SADRL fix 2026-11-17] round 17: raw per-agent reward in info (logging only; the training reward is unchanged)
             rewards = rewards * self.num_agents
 
             if self.shared_rewards:
@@ -1107,7 +1108,7 @@ class Mushrooms(MultiAgentEnv):
                 rewards_sum_all_agents += rewards
                 rewards = rewards_sum_all_agents
                 info = {
-                    "original_rewards": rewards.squeeze(),
+                    "original_rewards": agent_rewards,  # [SADRL fix 2026-11-17] was the team reward; now r_i, as in clean_up
                     "shaped_rewards": rewards.squeeze(),
                 }
             elif self.inequity_aversion:
@@ -1162,6 +1163,7 @@ class Mushrooms(MultiAgentEnv):
             
             blue_reward  = jnp.where(blue_matches, 1, 0)
             info["eat_blue_mushrooms"] = blue_reward.squeeze()
+            info["agent_rewards"] = agent_rewards  # [SADRL fix 2026-11-17] round 17: raw per-agent reward in info (logging only; the training reward is unchanged)
 
 
  

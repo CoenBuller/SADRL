@@ -32,7 +32,7 @@ from research.cc_mappo.credit import CREDIT_GATES, explained_variance, ev_smooth
 from research.cc_mappo.networks import CentralCreditCritic, LocalCreditCritic, MaskedCritic
 from algorithms.utils.networks import mappo_network_sizes
 
-CLEAN_ACTION, STAY_ACTION = 8, 6  # socialjax/environments/cleanup/clean_up.py Actions
+from algorithms.utils.env_roles import STAY_ACTION, role_action  # round 17 (E.4): any env; Clean Up: clean = 8, stay = 6
 
 
 class CCTransition(NamedTuple):
@@ -53,6 +53,7 @@ class CCTransition(NamedTuple):
 
 def make_train(config):
     env = socialjax.make(config["ENV_NAME"], **config["ENV_KWARGS"])
+    ROLE_ACTION, role = role_action(config["ENV_NAME"])  # round 17: log names credit_on_{role}, {role}_fraction, {role}_agent{i}
     mode = config["CREDIT_MODE"]
     assert mode in CREDIT_MODES, mode
     norm = config.get("CREDIT_NORM", "team")
@@ -287,10 +288,10 @@ def make_train(config):
             m = {
                 "credit_mean": credits.mean(), "credit_std": credits.std(),
                 "efficiency_gap_mean": gap.mean(), "efficiency_gap_std": gap.std(),
-                "credit_on_clean": masked(traj.action == CLEAN_ACTION),
+                f"credit_on_{role}": masked(traj.action == ROLE_ACTION),
                 "credit_on_stay": masked(traj.action == STAY_ACTION),
                 "credit_on_eat": masked(traj.agent_reward > 0),
-                "clean_fraction": jnp.mean(traj.action == CLEAN_ACTION),
+                f"{role}_fraction": jnp.mean(traj.action == ROLE_ACTION),
                 "value_mean": traj.value.mean(),
             }
             per_agent = by_agent.mean(axis=(0, 2)) * config["ENV_KWARGS"]["num_inner_steps"]  # summed over an episode
@@ -309,10 +310,10 @@ def make_train(config):
             m["critic_explained_var"] = 1.0 - jnp.var(targets - traj.value) / (jnp.var(targets) + 1e-8)
             per_episode = config["ENV_KWARGS"]["num_inner_steps"] / T
             rew = traj.agent_reward.reshape(T, n_agents, E).sum(0).mean(-1) * per_episode
-            cln = (traj.action == CLEAN_ACTION).reshape(T, n_agents, E).sum(0).mean(-1) * per_episode
+            cln = (traj.action == ROLE_ACTION).reshape(T, n_agents, E).sum(0).mean(-1) * per_episode
             for i in range(n_agents):
                 m[f"reward_agent{i}"] = rew[i]
-                m[f"clean_agent{i}"] = cln[i]
+                m[f"{role}_agent{i}"] = cln[i]
             if mode in ("coma", "qret"):
                 m["q_consistency"] = (baseline(traj.cq, traj.probs) - traj.value).mean()
             return m

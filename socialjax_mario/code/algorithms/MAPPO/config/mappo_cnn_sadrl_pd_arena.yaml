@@ -1,0 +1,22 @@
+# Round 17 (E.4, 2026-11-17): MAPPO on pd_arena with the Clean Up trainer (mappo_cnn_sadrl_pd_arena.py).
+# Rollout and network are passed on the command line (see slurm/batch_2026-11-17_round17_envs.sh).
+defaults:
+  - mappo_base
+
+"ENV_NAME": "pd_arena"
+"NUM_ENVS": 4
+"NUM_STEPS": 100
+"TOTAL_TIMESTEPS": 1e8
+"NUM_MINIBATCHES": 4
+
+"ENV_KWARGS":
+  "num_agents": 4  # as in SocialJax's mappo_cnn_pd_arena.yaml
+  "self_channel_fix": True  # fixed observation (upstream fb4ac0f)
+  "num_inner_steps": 1000
+  "shared_rewards": True
+  "cnn": True
+  "jit": True
+
+"REWARD": "MAPPO"
+"WANDB_TAGS":
+  - COMMON_REWARD

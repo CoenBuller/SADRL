@@ -1936,10 +1936,16 @@ class PD_Arena(MultiAgentEnv):
                 # cleanup/coop_mining and to give MAPPO/PPO enough gradient signal.
                 common_reward = rewards.mean() * self.num_agents
                 rewards_output = jnp.array([common_reward] * self.num_agents).squeeze()
+                agent_rewards = rewards.reshape(-1).astype(jnp.float32)  # [SADRL fix 2026-11-17] round 17: raw r_i (logging only)
                 rewards = rewards_output
 
                 # rewards = jnp.array([common_reward] * self.num_agents)
-                info = {}
+                # [SADRL fix 2026-11-17] was info = {}: the raw per-agent reward, as in clean_up (logging only)
+                info = {
+                    "original_rewards": agent_rewards,
+                    "shaped_rewards": rewards,
+                    "agent_rewards": agent_rewards,
+                }
 
             elif self.svo:
                 rewards, state, reborn_players = _interact_pd(key, state, actions)

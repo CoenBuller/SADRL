@@ -12,6 +12,7 @@ defaults:
 "ENV_KWARGS": 
   "num_agents": 7
   "self_channel_fix": True  # [SADRL fix 2026-11-06] fixed observation (upstream fb4ac0f); False = imported env, as in all runs before 2026-11-06
+  "self_view": "fixed"  # [SADRL fix 2026-11-17] round 17, F.2: "id_bit" / "partner_ring" = the two ingredients of the imported bug
   "num_inner_steps": 1000
   "shared_rewards": True
   "cnn": True

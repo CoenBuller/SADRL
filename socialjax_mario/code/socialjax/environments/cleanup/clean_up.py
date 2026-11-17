@@ -189,6 +189,7 @@ class Clean_up(MultiAgentEnv):
         num_outer_steps=1,
         num_agents=7,
         self_channel_fix=True,  # [SADRL fix 2026-11-06] False = the imported observation (self-channel off-by-one)
+        self_view="fixed",  # [SADRL fix 2026-11-17] "fixed" | "id_bit" | "partner_ring": diagnostic views (round 17, F.2)
         shared_rewards=True,
         inequity_aversion=False,
         inequity_aversion_target_agents=None,
@@ -248,6 +249,18 @@ class Clean_up(MultiAgentEnv):
         # With the fix off (0), the observation is exactly the imported one: only the last agent sees itself.
         self.self_channel_fix = bool(self_channel_fix)
         self._scf = 1 if self.self_channel_fix else 0
+        # [SADRL fix 2026-11-17] Round 17, F.2: split the imported bug into its two ingredients, on top of the fixed env.
+        #   "fixed":        every agent sees itself (self = 1, other = 0 on its own cell).
+        #   "id_bit":       agents 0..N-2 see their own cell as (self = 0, other = 1) and have no "self" marker anywhere;
+        #                   the last agent sees itself. Only the bug's 1-vs-(N-1) identity bit, no partner marker.
+        #   "partner_ring": every agent k sees agent (k+1) % N as "self" (not as another agent) and its own body as
+        #                   "other". Only the bug's partner marker, the same for every agent (no identity bit).
+        # Only the self / other-agent channels change; frozen and inventory lookups stay the fixed ones.
+        if self_view not in ("fixed", "id_bit", "partner_ring"):
+            raise ValueError(f"self_view must be 'fixed', 'id_bit' or 'partner_ring', got {self_view!r}")
+        if self_view != "fixed" and not self.self_channel_fix:
+            raise ValueError("self_view variants are defined on the fixed environment (self_channel_fix=True)")
+        self.self_view = self_view
 
         self.maxAppleGrowthRate = maxAppleGrowthRate
         self.thresholdDepletion = thresholdDepletion
@@ -385,6 +398,14 @@ class Clean_up(MultiAgentEnv):
 
                 # get agent's one-hot
                 agent_element = jnp.array([jnp.int8(x[agent - self._scf])])  # [SADRL fix 2026-11-06] self_channel_fix (upstream fb4ac0f)
+                # [SADRL fix 2026-11-17] round 17, F.2: the displayed "self" marker (true_self keeps the inventory logic)
+                true_self = agent_element
+                if self.self_view == "id_bit":
+                    is_last = (agent - len(Items)) == (self.num_agents - 1)
+                    agent_element = jnp.where(is_last, agent_element, jnp.zeros_like(agent_element))
+                elif self.self_view == "partner_ring":
+                    partner = (agent - len(Items) + 1) % self.num_agents
+                    agent_element = jnp.array([jnp.int8(x[partner + len(Items) - 1])])
 
                 # mask to check if any other agent exists there
                 mask = x[len(Items)-1:] > 0
@@ -425,7 +446,7 @@ class Clean_up(MultiAgentEnv):
                             show_inv_bool,
                             jnp.isin(item_idx-len(Items)+self._scf, show_inv_idxs),  # [SADRL fix 2026-11-06] self_channel_fix (upstream fb4ac0f)
                         ),
-                        agent_element
+                        true_self  # [SADRL fix 2026-11-17] was agent_element; identical unless self_view != fixed
                     ),
                     state.agent_invs[item_idx - len(Items) + self._scf],  # [SADRL fix 2026-11-06] self_channel_fix (upstream fb4ac0f)
                     jnp.array([0, 0], dtype=jnp.int8)

@@ -7,7 +7,8 @@ an export script and overwritten at every export, so please don't edit it by han
   (commit `9df972d`, 2026-08-21, Apache 2.0 licence, see `code/LICENSE`) with all of Mario's changes and
   research code. It runs as is; nothing to apply. It is the newest research branch, which contains all
   earlier ones.
-- `results/` holds the results of the runs on Clean Up.
+- `results/` holds the results of the runs on Clean Up. Runs on mushrooms, gift, pd_arena and harvest
+  (round 17) are under way; their results will be added here.
 
 Until 2026-11-06 this folder held `.patch` files instead; they are replaced by `code/`.
 
@@ -21,6 +22,9 @@ python tests/test_self_channel.py          # tests run as plain scripts
 python algorithms/train.py --algo MAPPO --env cleanup NUM_ENVS=2 NUM_STEPS=100 TOTAL_TIMESTEPS=400 WANDB_MODE=disabled
 python algorithms/train.py --algo MAPPO --env cc_cleanup CREDIT_MODE=loo CREDIT_GATE=ev \
     NUM_ENVS=2 NUM_STEPS=100 TOTAL_TIMESTEPS=400 WANDB_MODE=disabled
+# other envs (2026-11-17): --env sadrl_<env> (MAPPO) or cc_<env> (CC-MAPPO, loo_single by default),
+# <env> = mushrooms | gift | pd_arena | harvest_open
+python algorithms/train.py --algo MAPPO --env cc_mushrooms NUM_ENVS=2 NUM_STEPS=100 TOTAL_TIMESTEPS=400 WANDB_MODE=disabled
 ```
 
 The settings of every real run are in the batch scripts under `code/slurm/batch_*.sh`.
@@ -32,6 +36,7 @@ The settings of every real run are in the batch scripts under `code/slurm/batch_
 | `code/research/cc_mappo/` | Counterfactual-credit MAPPO: credit modes (`credit.py`: coma, qret, loo, local, the explained-variance gate; `loo_single` = loo with one masked critic, `MaskedCritic` in `networks.py`), training loop |
 | `code/algorithms/MAPPO/mappo_cnn_cleanup.py` | MAPPO on Clean Up with our fixes (world state stored once per step), network options (`CNN_SIZE`, `FC_SIZE`, `CNN_LAYERS`, `AGENT_ID` = one-hot agent id in the actor), diagnostics |
 | `code/algorithms/MAPPO/mappo_cnn_cc_cleanup.py` | Entry point for CC-MAPPO on Clean Up (`--env cc_cleanup`) |
+| `code/algorithms/MAPPO/mappo_cnn_{sadrl,cc}_<env>.py` | Since 2026-11-17: the same MAPPO and CC-MAPPO trainers (all diagnostics) on mushrooms, gift, pd_arena and harvest_open; `algorithms/utils/env_roles.py` names each env's characteristic action for the per-agent logs |
 | `code/research/dual_critic/` | IPPO/MAPPO with a team critic and an individual critic |
 | `code/research/mappo_grid/` | Run summaries, plots and the per-agent evaluation of saved actors |
 | `code/research/adaptive_ia/` | Adaptive inequity-aversion demo |
@@ -44,6 +49,11 @@ observation's "self" channel: only the last agent sees itself, the others see th
 agent. Upstream fixed it on 25 Sep 2026 (`fb4ac0f`). Here it is an environment option,
 `self_channel_fix`, default `True`; `False` gives back the old observation exactly. **Every run before
 2026-11-06 used the old observation**; runs on the fixed one have names starting with `FIX_`.
+We found the bug while looking into why agent 6 was always the harvester, then saw upstream had already fixed it.
+Since 2026-11-17, Clean Up also has `self_view` = `id_bit` | `partner_ring`, which split the old observation into
+its two ingredients (a 1-vs-6 identity bit for the last agent; a "self" marker on the next agent) to test which one
+helped learning. In the other envs, `info["original_rewards"]` is now the raw per-agent reward (as in Clean Up), so
+team return = number of agents × `returned_episode_original_returns` everywhere; the training reward is unchanged.
 
 ## Results
 
