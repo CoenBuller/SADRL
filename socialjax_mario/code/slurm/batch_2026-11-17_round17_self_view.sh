@@ -14,6 +14,7 @@ sub() { ./alice.sh submit "$@" 2>&1 | tail -1; }
 
 SMOKE="CNN_SIZE=small FC_SIZE=full NUM_ENVS=2 NUM_STEPS=100 NUM_MINIBATCHES=2 UPDATE_EPOCHS=2 SCALE_CLIP_EPS=True TOTAL_TIMESTEPS=400 WANDB_MODE=disabled GIF_NUM_FRAMES=3"
 
+if [ "${1:-part1}" = part1 ]; then
 sub --job-name=sj-test-selfview --time=00:30:00 --mem=16G slurm/python.sbatch tests/test_round17_self_view.py
 for v in id_bit partner_ring; do  # smoke on the cluster (2 updates), never on the laptop
   sub --job-name=sj-smoke-$v --time=00:30:00 slurm/train.sbatch --algo MAPPO --env cleanup $SMOKE ENV_KWARGS.self_view=$v
@@ -24,4 +25,26 @@ for seed in 30 31 32; do
   sub --job-name=sj-ring-s$seed --partition=gpu-short --time=03:30:00 slurm/train.sbatch \
       --algo MAPPO --env cleanup $COMMON ENV_KWARGS.self_view=partner_ring SEED=$seed REWARD=FIX_MAPPO_ring_csff_4x100_3e7
 done
+fi
+
+# --- Part 2 (17 Nov, ~20:00, Mario's OK): run with `./slurm/batch_2026-11-17_round17_self_view.sh part2` ---------------
+# Halfway through part 1 neither id_bit nor partner_ring left the ~900 level. Reading the code again: the frozen flags
+# are no difference (freeze is never updated in clean_up), but the inventory display is (fixed env: each agent sees its
+# own apple count on its own cell; imported: on agent k+1's cell, and agent 6 sees agent 5's count). Split the bug into
+#   bug_channels:  the imported self / other channels for all 7 agents, inventory display fixed
+#   bug_inventory: the imported inventory display, self / other channels fixed
+if [ "${1:-part1}" = part2 ]; then
+X="--exclude=node863"  # hung two smoke runs earlier today
+jid() { local id; id=$(./alice.sh submit "$@" 2>&1 | sed -n 's/^Submitted job \([0-9]*\).*/\1/p'); [ -n "$id" ] || { echo "submission failed: $*" >&2; exit 1; }; echo "$id"; }
+DEPS=$(jid $X --job-name=sj-test-selfview2 --time=00:30:00 --mem=16G slurm/python.sbatch tests/test_round17_self_view.py)
+for v in bug_channels bug_inventory; do
+  DEPS="$DEPS:$(jid $X --job-name=sj-smoke-$v --time=00:30:00 slurm/train.sbatch --algo MAPPO --env cleanup $SMOKE ENV_KWARGS.self_view=$v)"
+done
+for seed in 30 31 32; do
+  jid $X --dependency=afterok:$DEPS --job-name=sj-bch-s$seed --partition=gpu-short --time=03:30:00 slurm/train.sbatch \
+      --algo MAPPO --env cleanup $COMMON ENV_KWARGS.self_view=bug_channels SEED=$seed REWARD=FIX_MAPPO_bugch_csff_4x100_3e7 > /dev/null
+  jid $X --dependency=afterok:$DEPS --job-name=sj-binv-s$seed --partition=gpu-short --time=03:30:00 slurm/train.sbatch \
+      --algo MAPPO --env cleanup $COMMON ENV_KWARGS.self_view=bug_inventory SEED=$seed REWARD=FIX_MAPPO_buginv_csff_4x100_3e7 > /dev/null
+done
+fi
 ./alice.sh status

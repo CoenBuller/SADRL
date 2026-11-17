@@ -189,7 +189,7 @@ class Clean_up(MultiAgentEnv):
         num_outer_steps=1,
         num_agents=7,
         self_channel_fix=True,  # [SADRL fix 2026-11-06] False = the imported observation (self-channel off-by-one)
-        self_view="fixed",  # [SADRL fix 2026-11-17] "fixed" | "id_bit" | "partner_ring": diagnostic views (round 17, F.2)
+        self_view="fixed",  # [SADRL fix 2026-11-17] "fixed" | "id_bit" | "partner_ring" | "bug_channels" | "bug_inventory" (round 17, F.2)
         shared_rewards=True,
         inequity_aversion=False,
         inequity_aversion_target_agents=None,
@@ -255,9 +255,15 @@ class Clean_up(MultiAgentEnv):
         #                   the last agent sees itself. Only the bug's 1-vs-(N-1) identity bit, no partner marker.
         #   "partner_ring": every agent k sees agent (k+1) % N as "self" (not as another agent) and its own body as
         #                   "other". Only the bug's partner marker, the same for every agent (no identity bit).
-        # Only the self / other-agent channels change; frozen and inventory lookups stay the fixed ones.
-        if self_view not in ("fixed", "id_bit", "partner_ring"):
-            raise ValueError(f"self_view must be 'fixed', 'id_bit' or 'partner_ring', got {self_view!r}")
+        #   "bug_channels": the imported self / other-agent channels for every agent (= partner_ring for agents 0..N-2, the
+        #                   last agent sees itself), inventory display as in the fixed env.
+        #   "bug_inventory": the imported inventory display (shown where the imported "self" marker is: agents 0..N-2 see
+        #                   their own apple count on agent k+1's cell, the last agent sees agent N-2's count on its own
+        #                   cell), self / other-agent channels as in the fixed env.
+        # Frozen flags are not split: freeze is never updated in clean_up (always -1), so they are 0 in both envs.
+        # The first two change only the self / other-agent channels; the inventory display stays the fixed one.
+        if self_view not in ("fixed", "id_bit", "partner_ring", "bug_channels", "bug_inventory"):
+            raise ValueError(f"self_view must be one of fixed, id_bit, partner_ring, bug_channels, bug_inventory; got {self_view!r}")
         if self_view != "fixed" and not self.self_channel_fix:
             raise ValueError("self_view variants are defined on the fixed environment (self_channel_fix=True)")
         self.self_view = self_view
@@ -406,6 +412,11 @@ class Clean_up(MultiAgentEnv):
                 elif self.self_view == "partner_ring":
                     partner = (agent - len(Items) + 1) % self.num_agents
                     agent_element = jnp.array([jnp.int8(x[partner + len(Items) - 1])])
+                bug_self = jnp.array([jnp.int8(x[agent])])  # [SADRL fix 2026-11-17] the imported (off-by-one) self marker
+                if self.self_view == "bug_channels":
+                    agent_element = bug_self
+                # [SADRL fix 2026-11-17] inventory display: shown where the (true or imported) self marker is
+                inv_flag, inv_off = (bug_self, 0) if self.self_view == "bug_inventory" else (true_self, self._scf)
 
                 # mask to check if any other agent exists there
                 mask = x[len(Items)-1:] > 0
@@ -446,9 +457,9 @@ class Clean_up(MultiAgentEnv):
                             show_inv_bool,
                             jnp.isin(item_idx-len(Items)+self._scf, show_inv_idxs),  # [SADRL fix 2026-11-06] self_channel_fix (upstream fb4ac0f)
                         ),
-                        true_self  # [SADRL fix 2026-11-17] was agent_element; identical unless self_view != fixed
+                        inv_flag  # [SADRL fix 2026-11-17] was agent_element; identical unless self_view != fixed
                     ),
-                    state.agent_invs[item_idx - len(Items) + self._scf],  # [SADRL fix 2026-11-06] self_channel_fix (upstream fb4ac0f)
+                    state.agent_invs[item_idx - len(Items) + inv_off],  # [SADRL fix 2026-11-06/17] self_channel_fix; bug_inventory
                     jnp.array([0, 0], dtype=jnp.int8)
                 )[0]
 

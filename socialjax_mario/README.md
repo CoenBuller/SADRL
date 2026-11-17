@@ -50,7 +50,7 @@ agent. Upstream fixed it on 25 Sep 2026 (`fb4ac0f`). Here it is an environment o
 `self_channel_fix`, default `True`; `False` gives back the old observation exactly. **Every run before
 2026-11-06 used the old observation**; runs on the fixed one have names starting with `FIX_`.
 We found the bug while looking into why agent 6 was always the harvester, then saw upstream had already fixed it.
-Since 2026-11-17, Clean Up also has `self_view` = `id_bit` | `partner_ring`, which split the old observation into
+Since 2026-11-17, Clean Up also has `self_view` = `id_bit` | `partner_ring` | `bug_channels` | `bug_inventory`, which split the old observation into
 its two ingredients (a 1-vs-6 identity bit for the last agent; a "self" marker on the next agent) to test which one
 helped learning. In the other envs, `info["original_rewards"]` is now the raw per-agent reward (as in Clean Up), so
 team return = number of agents × `returned_episode_original_returns` everywhere; the training reward is unchanged.
