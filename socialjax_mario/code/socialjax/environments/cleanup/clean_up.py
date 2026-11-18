@@ -189,7 +189,7 @@ class Clean_up(MultiAgentEnv):
         num_outer_steps=1,
         num_agents=7,
         self_channel_fix=True,  # [SADRL fix 2026-11-06] False = the imported observation (self-channel off-by-one)
-        self_view="fixed",  # [SADRL fix 2026-11-17] "fixed" | "id_bit" | "partner_ring" | "bug_channels" | "bug_inventory" (round 17, F.2)
+        self_view="fixed",  # [SADRL fix 2026-11-17] "fixed" | "id_bit" | "partner_ring" | "bug_channels" | "bug_inventory" (round 17, F.2) | "no_inventory" (round 18, G.1)
         shared_rewards=True,
         inequity_aversion=False,
         inequity_aversion_target_agents=None,
@@ -262,8 +262,11 @@ class Clean_up(MultiAgentEnv):
         #                   cell), self / other-agent channels as in the fixed env.
         # Frozen flags are not split: freeze is never updated in clean_up (always -1), so they are 0 in both envs.
         # The first two change only the self / other-agent channels; the inventory display stays the fixed one.
-        if self_view not in ("fixed", "id_bit", "partner_ring", "bug_channels", "bug_inventory"):
-            raise ValueError(f"self_view must be one of fixed, id_bit, partner_ring, bug_channels, bug_inventory; got {self_view!r}")
+        # [SADRL fix 2026-11-18] Round 18, G.1:
+        #   "no_inventory": the fixed env with the inventory display switched off (both inventory channels 0 on every
+        #                   cell, for every agent); everything else as in the fixed env.
+        if self_view not in ("fixed", "id_bit", "partner_ring", "bug_channels", "bug_inventory", "no_inventory"):
+            raise ValueError(f"self_view must be one of fixed, id_bit, partner_ring, bug_channels, bug_inventory, no_inventory; got {self_view!r}")
         if self_view != "fixed" and not self.self_channel_fix:
             raise ValueError("self_view variants are defined on the fixed environment (self_channel_fix=True)")
         self.self_view = self_view
@@ -462,6 +465,8 @@ class Clean_up(MultiAgentEnv):
                     state.agent_invs[item_idx - len(Items) + inv_off],  # [SADRL fix 2026-11-06/17] self_channel_fix; bug_inventory
                     jnp.array([0, 0], dtype=jnp.int8)
                 )[0]
+                if self.self_view == "no_inventory":  # [SADRL fix 2026-11-18] round 18, G.1: inventory display off
+                    inv_to_show = jnp.zeros_like(inv_to_show)
 
                 # check if agent is not the subject & is frozen & therefore
                 # not possible to interact with

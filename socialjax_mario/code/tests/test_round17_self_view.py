@@ -9,6 +9,8 @@ driven by the same keys and actions (observations don't affect the dynamics, so 
     agent's own cell is "other" and it has at most one self marker (agent 0), never on its own cell.
   - bug_channels: the imported self / other channels for every agent, every other channel as in the fixed env.
   - bug_inventory: the imported inventory channels for every agent, every other channel as in the fixed env.
+  - [SADRL fix 2026-11-18] no_inventory (round 18, G.1): both inventory channels 0 everywhere, every other channel as
+    in the fixed env.
   - the frozen channel is 0 everywhere in both envs (freeze is never updated in clean_up), and the inventory channels
     do differ between the two envs during the rollout (so the bug_inventory check is not vacuous).
 
@@ -52,8 +54,9 @@ def _rollout(**kw):
 def test_variants():
     frames, n, sc = _rollout(fixed={}, bug={"self_channel_fix": False},
                              id_bit={"self_view": "id_bit"}, ring={"self_view": "partner_ring"},
-                             bch={"self_view": "bug_channels"}, binv={"self_view": "bug_inventory"})
-    inv_differs = False
+                             bch={"self_view": "bug_channels"}, binv={"self_view": "bug_inventory"},
+                             noinv={"self_view": "no_inventory"})
+    inv_differs = inv_shown = False
     for t, f in enumerate(frames):
         fx = f["fixed"]
         own = fx[..., sc] != 0                                   # each agent's own cell
@@ -81,8 +84,14 @@ def test_variants():
             rest = [c for c in range(C) if c not in chans]
             assert (v[..., chans] == bug[..., chans]).all(), f"{name} step {t}: differs from the imported channels {chans}"
             assert (v[..., rest] == fx[..., rest]).all(), f"{name} step {t}: other channels differ from the fixed env"
+        ni = f["noinv"]
+        assert (ni[..., inv] == 0).all(), f"no_inventory step {t}: inventory channels not 0"
+        rest = [c for c in range(C) if c not in inv]
+        assert (ni[..., rest] == fx[..., rest]).all(), f"no_inventory step {t}: other channels differ from the fixed env"
         assert (fx[..., frz] == 0).all() and (bug[..., frz] == 0).all(), f"step {t}: frozen channel not 0"
+        inv_shown |= bool((fx[..., inv] != 0).any())
         inv_differs |= bool((fx[..., inv] != bug[..., inv]).any())
+    assert inv_shown, "fixed env never shows an inventory: the no_inventory check is vacuous"
     assert inv_differs, "inventory channels never differ between fixed and imported env: bug_inventory check is vacuous"
 
 
