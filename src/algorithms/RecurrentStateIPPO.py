@@ -29,20 +29,24 @@ def next_embedding_loss(
     min_std: float = 0.1,
     var_coef: float = 0.1,
 ) -> jnp.ndarray:
-    """Predict z_{t+1} from (rnn_out_t, a_t), masked on episode resets."""
+    """Predict direction of z_{t+1} from (rnn_out_t, a_t) via cosine distance + VICReg std hinge."""
     if pred_next_emb.shape[0] < 2:
         return jnp.zeros(())
 
     pred_t = pred_next_emb[:-1]                  # (T-1, B, D)
     target_tp1 = target_next_emb[1:]             # (T-1, B, D) already stop_gradient'd
-    valid = (1.0 - dones[:-1].astype(jnp.float32))[..., None]
+    valid = 1.0 - dones[:-1].astype(jnp.float32) # (T-1, B)
 
-    mse = jnp.sum(jnp.square(pred_t - target_tp1) * valid) / jnp.maximum(jnp.sum(valid), 1.0)
+    # Cosine distance in [0, 2]: removes the 64x sum blowup and makes norm-shrinkage useless
+    pred_norm = pred_t / (jnp.linalg.norm(pred_t, axis=-1, keepdims=True) + 1e-8)
+    target_norm = target_tp1 / (jnp.linalg.norm(target_tp1, axis=-1, keepdims=True) + 1e-8)
+    cos_dist = 1.0 - jnp.sum(pred_norm * target_norm, axis=-1)
+    pred_loss = jnp.sum(cos_dist * valid) / jnp.maximum(jnp.sum(valid), 1.0)
 
-    flat_pred = pred_t.reshape((-1, pred_t.shape[-1]))
-    std_per_dim = jnp.std(flat_pred, axis=0)
+    flat_pred = pred_norm.reshape((-1, pred_norm.shape[-1]))
+    std_per_dim = jnp.sqrt(jnp.var(flat_pred, axis=0) + 1e-4)
     var_penalty = jnp.mean(jax.nn.relu(min_std - std_per_dim))
-    return mse + var_coef * var_penalty
+    return pred_loss + var_coef * var_penalty
 
 
 def make_train_recurrent(config):
