@@ -1,17 +1,18 @@
 #!/bin/bash
 
 # ================= Configuration =================
-REPO_URL="git@github.com:CoenBuller/SADRL.git" 
+REPO_URL="git@github.com:CoenBuller/SADRL.git"
 REPO_DIR="/local/s2631415/SADRL"
 LOG_FILE="active_deployments.log"
+CONFIG_FILE="experiments/next_emb.yaml"
 
 EXPERIMENTS=(
-    "SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:true:true\" ENV_NAME=clean_up N_AGENTS=7 NUM_STEPS=100"
-    "SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:false:true\" ENV_NAME=clean_up N_AGENTS=7 NUM_STEPS=100"
-    "SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:true:true\" ENV_NAME=gift N_AGENTS=5 NUM_STEPS=100"
-    "SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:false:true\" ENV_NAME=gift N_AGENTS=5 NUM_STEPS=100"
-    "SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:true:true\" ENV_NAME=pd_arena N_AGENTS=4 NUM_STEPS=25"
-    "SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:false:true\" ENV_NAME=pd_arena N_AGENTS=4 NUM_STEPS=25"
+    "CONFIG=\"$CONFIG_FILE\" PREDICT_NEXT_STATE=true SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:true:true\" ENV_NAME=clean_up N_AGENTS=7 NUM_STEPS=100"
+    "CONFIG=\"$CONFIG_FILE\" PREDICT_NEXT_STATE=true SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:false:true\" ENV_NAME=clean_up N_AGENTS=7 NUM_STEPS=100"
+    "CONFIG=\"$CONFIG_FILE\" PREDICT_NEXT_STATE=true SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:true:true\" ENV_NAME=gift N_AGENTS=5 NUM_STEPS=100"
+    "CONFIG=\"$CONFIG_FILE\" PREDICT_NEXT_STATE=true SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:false:true\" ENV_NAME=gift N_AGENTS=5 NUM_STEPS=100"
+    "CONFIG=\"$CONFIG_FILE\" PREDICT_NEXT_STATE=true SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:true:true\" ENV_NAME=pd_arena N_AGENTS=4 NUM_STEPS=25"
+    "CONFIG=\"$CONFIG_FILE\" PREDICT_NEXT_STATE=true SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:false:true\" ENV_NAME=pd_arena N_AGENTS=4 NUM_STEPS=25"
 )
 
 PREFIX="00650"
@@ -46,25 +47,25 @@ while [ $EXP_IDX -lt ${#EXPERIMENTS[@]} ]; do
 
     NODE="${NODES[$NODE_IDX]}"
     EXP_PARAMS="${EXPERIMENTS[$EXP_IDX]}"
-    
+
     ssh -q -T -o LogLevel=QUIET -o BatchMode=yes -o ConnectTimeout=5 "$NODE" '
         REMOTE_USER=$(whoami)
         OTHER_USERS=$(who | awk "{print \$1}" | sort -u | grep -v "^${REMOTE_USER}$" | wc -l)
         if [ "$OTHER_USERS" -gt 0 ]; then exit 1; fi
-        
+
         if ! command -v nvidia-smi &> /dev/null; then exit 3; fi
-        
+
         GPU_PIDS=$(nvidia-smi --query-compute-apps=pid --format=csv,noheader)
         if [ -n "$GPU_PIDS" ]; then exit 2; fi
-        
+
         exit 0
     ' > /dev/null 2>&1
-    
+
     STATUS=$?
 
     if [ $STATUS -eq 0 ]; then
         printf "%-15s | \e[32m[DEPLOYING]\e[0m Experiment $((EXP_IDX+1)) -> %s\n" "$NODE" "$EXP_PARAMS"
-        
+
         ssh -q -T -o BatchMode=yes "$NODE" "
             mkdir -p /local/s2631415 && chmod 700 /local/s2631415
 
@@ -72,21 +73,20 @@ while [ $EXP_IDX -lt ${#EXPERIMENTS[@]} ]; do
                 cd /local/s2631415
                 git clone $REPO_URL
             fi
-            
+
             cd \"$REPO_DIR\"
             git checkout coen
             git pull
-            
+
             tmux new-session -d -s train 'source ~/.bashrc && $EXP_PARAMS ./run_local.sh'
         "
-        
-        # Log to array for terminal summary, and write directly to file
+
         DEPLOYED_LOG+=("[$NODE] running: $EXP_PARAMS")
         echo "[$NODE] running: $EXP_PARAMS" >> "$LOG_FILE"
-        
+
         EXP_IDX=$((EXP_IDX + 1))
     fi
-    
+
     NODE_IDX=$((NODE_IDX + 1))
 done
 

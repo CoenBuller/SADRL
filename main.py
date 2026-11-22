@@ -14,6 +14,7 @@ from src.algorithms.IPPO import make_train_IPPO
 from src.algorithms.MAPPO import make_train_MAPPO
 from src.algorithms.RecurrentMAPPO import make_train_recurrent as make_train_RecurrentMAPPO
 from src.algorithms.RecurrentIPPO import make_train_recurrent as make_train_RecurrentIPPO
+from src.algorithms.RecurrentStateIPPO import make_train_recurrent as make_train_RecurrentStateIPPO
 from src.evaluate import make_gif
 
 _BOOL = lambda x: (str(x).lower() in ["true", "1", "yes"])
@@ -26,6 +27,8 @@ def make_tag(cfg: dict) -> str:
         tag += "_lstm"
     if cfg["PREDICT_POS"]:
         tag += "_pos"
+    if cfg.get("PREDICT_NEXT_STATE"):
+        tag += "_nextemb"
     return tag
 
 
@@ -39,6 +42,8 @@ def main():
     p.add_argument("--rep", type=_BOOL, default=None)
     p.add_argument("--predict_pos", type=_BOOL, default=None, help="Auxiliary position prediction (RecurrentMAPPO/RecurrentIPPO only)")
     p.add_argument("--pos_coef", type=float, default=None)
+    p.add_argument("--predict_next_state", type=_BOOL, default=None, help="Auxiliary next-embedding prediction (RecurrentIPPO with next-state prediction)")
+    p.add_argument("--next_state_coef", type=float, default=None)
     p.add_argument("--wandb", type=_BOOL, default=None)
     p.add_argument("--total_timesteps", type=int, default=None)
     p.add_argument("--n_agents", type=int, default=None)
@@ -67,6 +72,10 @@ def main():
         cli_overrides["PREDICT_POS"] = args.predict_pos
     if args.pos_coef is not None:
         cli_overrides["POS_COEF"] = args.pos_coef
+    if args.predict_next_state is not None:
+        cli_overrides["PREDICT_NEXT_STATE"] = args.predict_next_state
+    if args.next_state_coef is not None:
+        cli_overrides["NEXT_STATE_COEF"] = args.next_state_coef
     if args.wandb is not None:
         cli_overrides["WANDB"] = args.wandb
     if args.total_timesteps is not None:
@@ -94,6 +103,8 @@ def main():
         raise ValueError(f"Unknown ALGO: {algo}. Expected one of {valid_algos}.")
     if config_dict["PREDICT_POS"] and algo not in ("RecurrentMAPPO", "RecurrentIPPO"):
         raise ValueError(f"PREDICT_POS=True requires ALGO=RecurrentMAPPO or RecurrentIPPO (got {algo}).")
+    if config_dict.get("PREDICT_NEXT_STATE") and algo != "RecurrentIPPO":
+        raise ValueError(f"PREDICT_NEXT_STATE=True requires ALGO=RecurrentIPPO (got {algo}).")
 
     tag = make_tag(config_dict)
 
@@ -116,7 +127,10 @@ def main():
     elif algo == "MAPPO":
         train_fn = make_train_MAPPO(config_dict)
     elif algo == "RecurrentIPPO":
-        train_fn = make_train_RecurrentIPPO(config_dict)
+        if config_dict.get("PREDICT_NEXT_STATE"):
+            train_fn = make_train_RecurrentStateIPPO(config_dict)
+        else:
+            train_fn = make_train_RecurrentIPPO(config_dict)
     else:
         train_fn = make_train_RecurrentMAPPO(config_dict)
 

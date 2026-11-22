@@ -1,0 +1,53 @@
+# Environment
+ENV_NAME: "clean_up"
+N_AGENTS: 7
+N_ENVS: 10
+TOTAL_TIMESTEPS: 100000000
+NUM_STEPS: 100
+SEED: 30
+MAP_H: null
+MAP_W: null
+
+# Storage
+WANDB: true
+GIF_FRAMES: 1000
+OUT_DIR: "results"
+
+# Reputation
+OWN_POS: [9, 5]
+REP_DECAY: 0.95
+
+# Algorithm & Architecture
+ALGO: "RecurrentIPPO"
+COMMON_REWARD: true
+REPUTATION: false
+SMALL: true
+HIDDEN_DIM: 64
+ACTIVATION: "relu"
+LSTM: true
+
+# RNN & Auxiliary Next-Embedding Prediction (no position prediction)
+RNN_WARMUP: 10
+WINDOW: 30
+PREDICT_POS: false
+POS_COEF: 0.1
+PREDICT_NEXT_STATE: true
+NEXT_STATE_COEF: 0.05
+NEXT_VAR_MIN_STD: 0.1
+NEXT_VAR_COEF: 0.1
+
+# Optimization loop
+UPDATE_EPOCHS: 2
+NUM_MINIBATCHES: 10
+
+# Optimizer
+MAX_GRAD_NORM: 0.5
+ANNEAL_LR: true
+LR: 0.0003
+
+# Advantage & Loss
+GAMMA: 0.99
+GAE_LAMBDA: 0.95
+CLIP_EPS: 0.2
+VF_COEF: 0.5
+ENT_COEF: 0.01

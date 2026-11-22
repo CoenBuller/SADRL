@@ -3,11 +3,12 @@ Smoke test for the recurrent runs:
   1. MAPPO                       (feedforward)
   2. RecurrentMAPPO              (no position prediction, GRU default)
   3. RecurrentMAPPO + PREDICT_POS
-  4. RecurrentIPPO               (no position prediction, LSTM)
+  4. RecurrentIPPO               (no position/next-state prediction, LSTM)
   5. RecurrentIPPO + PREDICT_POS + LSTM
+  6. RecurrentIPPO + PREDICT_NEXT_STATE + LSTM
 
 Checks: env map-size inference + normalized positions in [0,1], JIT tracing,
-finite losses/params, and that pos_loss behaves as expected for each variant.
+finite losses/params, and that pos_loss / next_emb_loss behave as expected.
 
 Usage: python smoke_test.py [--env clean_up] [--n_agents 7]
 """
@@ -27,7 +28,7 @@ import numpy as np
 
 from src.algorithms.MAPPO import make_train_MAPPO
 from src.algorithms.RecurrentMAPPO import make_train_recurrent as make_train_recurrent_mappo
-from src.algorithms.RecurrentIPPO import make_train_recurrent as make_train_recurrent_ippo
+from src.algorithms.RecurrentStateIPPO import make_train_recurrent as make_train_recurrent_ippo
 from src.environments.env_wrapper import Environment
 
 
@@ -48,9 +49,13 @@ def make_config(env_name, n_agents):
         "SMALL": True,
         "ACTIVATION": "relu",
         "HIDDEN_DIM": 16,
-        # Position prediction & LSTM
+        # Position prediction, next-embedding prediction & LSTM
         "PREDICT_POS": False,
         "POS_COEF": 0.5,
+        "PREDICT_NEXT_STATE": False,
+        "NEXT_STATE_COEF": 0.05,
+        "NEXT_VAR_MIN_STD": 0.1,
+        "NEXT_VAR_COEF": 0.1,
         "LSTM": False,
         "MAP_H": None,
         "MAP_W": None,
@@ -102,7 +107,6 @@ def check_env(cfg):
         "normalized positions fall outside [0,1]: map size is wrong or the grid is padded "
         "(set MAP_H/MAP_W and subtract the padding offset)"
     )
-    # Heuristic only: spawns are random, so the max over 20+ agents should not be tiny.
     if xy.max() < 0.5:
         print("WARNING: all positions < 0.5. The grid is probably padded; targets will not span [0,1].")
     print("env check OK\n")
@@ -121,10 +125,15 @@ def run_case(name, builder, overrides, base_cfg):
 
     for i in range(len(metrics["losses/total_loss"])):
         pos = f" | Pos = {metrics['losses/pos_loss'][i]:.4f}" if "losses/pos_loss" in metrics else ""
+        next_emb = (
+            f" | NextEmb = {metrics['losses/next_emb_loss'][i]:.4f}"
+            if "losses/next_emb_loss" in metrics
+            else ""
+        )
         print(
             f"Update {i + 1}: Total = {metrics['losses/total_loss'][i]:.4f} | "
             f"Actor = {metrics['losses/actor_loss'][i]:.4f} | "
-            f"Critic = {metrics['losses/critic_loss'][i]:.4f}{pos}"
+            f"Critic = {metrics['losses/critic_loss'][i]:.4f}{pos}{next_emb}"
         )
 
     for k in ("losses/total_loss", "losses/actor_loss", "losses/critic_loss"):
@@ -141,6 +150,14 @@ def run_case(name, builder, overrides, base_cfg):
         assert (pl < 1.0).all(), "pos_loss >= 1 means predictions are off-scale (targets outside [0,1]?)"
     else:
         assert (metrics["losses/pos_loss"] == 0).all(), "pos_loss should be exactly 0 with PREDICT_POS=False"
+
+    if cfg.get("ALGO") == "RecurrentIPPO" and "losses/next_emb_loss" in metrics:
+        nel = metrics["losses/next_emb_loss"]
+        assert np.isfinite(nel).all(), "non-finite next_emb_loss"
+        if cfg.get("PREDICT_NEXT_STATE"):
+            assert (nel > 0).all(), "next_emb_loss is zero with PREDICT_NEXT_STATE=True"
+        else:
+            assert (nel == 0).all(), "next_emb_loss should be 0 with PREDICT_NEXT_STATE=False"
 
     print(f"PASSED ({n_leaves} param leaves)\n")
     return n_leaves
@@ -167,8 +184,9 @@ def main():
         ("MAPPO", make_train_MAPPO, {"ALGO": "MAPPO", "PREDICT_POS": False, "LSTM": False, "_kind": "ff"}),
         ("RecurrentMAPPO", make_train_recurrent_mappo, {"ALGO": "RecurrentMAPPO", "PREDICT_POS": False, "LSTM": False}),
         ("RecurrentMAPPO+pos", make_train_recurrent_mappo, {"ALGO": "RecurrentMAPPO", "PREDICT_POS": True, "LSTM": False}),
-        ("RecurrentIPPO+LSTM", make_train_recurrent_ippo, {"ALGO": "RecurrentIPPO", "PREDICT_POS": False, "LSTM": True}),
-        ("RecurrentIPPO+pos+LSTM", make_train_recurrent_ippo, {"ALGO": "RecurrentIPPO", "PREDICT_POS": True, "LSTM": True}),
+        ("RecurrentIPPO+LSTM", make_train_recurrent_ippo, {"ALGO": "RecurrentIPPO", "PREDICT_POS": False, "PREDICT_NEXT_STATE": False, "LSTM": True}),
+        ("RecurrentIPPO+pos+LSTM", make_train_recurrent_ippo, {"ALGO": "RecurrentIPPO", "PREDICT_POS": True, "PREDICT_NEXT_STATE": False, "LSTM": True}),
+        ("RecurrentIPPO+nextemb+LSTM", make_train_recurrent_ippo, {"ALGO": "RecurrentIPPO", "PREDICT_POS": False, "PREDICT_NEXT_STATE": True, "LSTM": True}),
     ]
     leaves = {}
     for name, builder, overrides in cases:
@@ -189,6 +207,11 @@ def main():
         print(f"IPPO Position head adds parameters: {ok}")
         results["ippo pos head present"] = ok
 
+    if "RecurrentIPPO+LSTM" in leaves and "RecurrentIPPO+nextemb+LSTM" in leaves:
+        ok = leaves["RecurrentIPPO+nextemb+LSTM"] > leaves["RecurrentIPPO+LSTM"]
+        print(f"IPPO Next-embedding head adds parameters: {ok}")
+        results["ippo nextemb head present"] = ok
+
     print("=" * 80)
     for k, v in results.items():
         print(f"{'PASS' if v else 'FAIL'}  {k}")
@@ -198,3 +221,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

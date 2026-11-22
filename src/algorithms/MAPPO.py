@@ -6,7 +6,7 @@ import wandb
 from typing import Any, NamedTuple
 from flax.training.train_state import TrainState
 
-from src.networks.networks2 import MAPPOAC
+from src.networks.networks import MAPPOAC
 from src.environments.env_wrapper import Environment
 from src.algorithms.utils import make_world_state
 

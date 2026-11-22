@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+
 @dataclass
 class Config:
     # Environment
@@ -17,7 +18,7 @@ class Config:
     GIF_FRAMES: int = 1000
     OUT_DIR: str = "results"
 
-    # Reputation 
+    # Reputation
     OWN_POS: tuple[int, int] = (9, 5)
     REP_DECAY: float = 0.95
 
@@ -26,15 +27,19 @@ class Config:
     COMMON_REWARD: bool = True
     ACTIVATION: str = "relu"
     REPUTATION: bool = False
-    SMALL: bool = True     # Use the small actor criti or not.
+    SMALL: bool = True  # Use the small actor critic or not.
     HIDDEN_DIM: int = 32
 
-    # RNN settings
-    RNN_WARMUP: int = 10        # If using RNN network and prediction features over the recurrent steps, we let it warm up for 's' steps 
-    WINDOW: int = 30            # RNN looks over a window of 30 steps
-    PREDICT_POS: bool = False   # auxiliary absolute-position prediction from RNN output
+    # RNN & auxiliary prediction settings
+    RNN_WARMUP: int = 10  # Warm up for 's' steps before auxiliary prediction features
+    WINDOW: int = 30  # RNN looks over a window of 30 steps
+    PREDICT_POS: bool = False  # Auxiliary absolute-position prediction from RNN output
     POS_COEF: float = 0.1
-    LSTM: bool = False          # If True, use an LSTM. Default to GRU otherwise.
+    PREDICT_NEXT_STATE: bool = False  # Auxiliary next-embedding prediction from RNN output
+    NEXT_STATE_COEF: float = 0.05  # Weight on next-embedding loss
+    NEXT_VAR_MIN_STD: float = 0.1  # Minimum per-dim std floor to prevent predictor collapse
+    NEXT_VAR_COEF: float = 0.1  # Weight on variance floor penalty
+    LSTM: bool = False  # If True, use an LSTM. Default to GRU otherwise.
 
     # Optimization loop
     UPDATE_EPOCHS: int = 10
@@ -49,5 +54,5 @@ class Config:
     GAMMA: float = 0.99
     GAE_LAMBDA: float = 0.95
     CLIP_EPS: float = 0.2
-    VF_COEF: float = 0.5 
+    VF_COEF: float = 0.5
     ENT_COEF: float = 0.01
