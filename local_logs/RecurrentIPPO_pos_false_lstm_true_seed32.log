@@ -1,0 +1,114 @@
+Using CPython 3.11.17
+Creating virtual environment at: .venv
+   Updating https://github.com/CoenBuller/SocialJax (HEAD)
+Downloading pyopengl (2.3MiB)
+Downloading pygments (1.2MiB)
+Downloading nvidia-nvshmem-cu12 (267.8MiB)
+Downloading matplotlib (8.2MiB)
+Downloading networkx (2.0MiB)
+Downloading nvidia-cuda-runtime-cu12 (3.3MiB)
+Downloading nvidia-cublas-cu12 (554.3MiB)
+Downloading nvidia-cuda-cccl-cu12 (3.0MiB)
+Downloading jax (2.6MiB)
+Downloading tensorboard-data-server (6.3MiB)
+Downloading jaxlib (85.8MiB)
+Downloading nvidia-cuda-nvcc-cu12 (38.7MiB)
+Downloading nvidia-cusolver-cu12 (322.5MiB)
+Downloading cuda-bindings (6.8MiB)
+Downloading nvidia-cuda-nvrtc-cu12 (85.4MiB)
+Downloading nvidia-cufft-cu12 (191.6MiB)
+Downloading pillow (4.3MiB)
+Downloading tensorflow-probability (6.7MiB)
+Downloading nvidia-cudnn-cu12 (730.7MiB)
+Downloading nvidia-nvjitlink-cu12 (37.9MiB)
+Downloading kiwisolver (1.4MiB)
+Downloading triton (236.5MiB)
+Downloading tensorboard (5.3MiB)
+Downloading nvidia-cusparse-cu12 (349.5MiB)
+Downloading pandas (12.5MiB)
+Downloading pydantic-core (1.9MiB)
+Downloading nvidia-cuda-cupti-cu12 (10.3MiB)
+Downloading scipy (36.6MiB)
+Downloading numpy (17.4MiB)
+Downloading mujoco-mjx (6.1MiB)
+Downloading nvidia-nccl-cu12 (335.2MiB)
+Downloading torch (528.9MiB)
+Downloading ml-dtypes (4.5MiB)
+Downloading grpcio (5.7MiB)
+Downloading mujoco (5.2MiB)
+Downloading jax-cuda12-pjrt (119.5MiB)
+Downloading wandb (25.2MiB)
+Downloading jax-cuda12-plugin (15.1MiB)
+Downloading pytinyrenderer (1.9MiB)
+Downloading tensorstore (17.0MiB)
+Downloading fonttools (4.7MiB)
+ Downloaded pygments
+ Downloaded kiwisolver
+ Downloaded pydantic-core
+ Downloaded networkx
+   Building cleanrl==0.4.8
+   Building antlr4-python3-runtime==4.9.3
+ Downloaded pytinyrenderer
+ Downloaded pyopengl
+ Downloaded jax
+ Downloaded nvidia-cuda-cccl-cu12
+ Downloaded nvidia-cuda-runtime-cu12
+ Downloaded pillow
+ Downloaded ml-dtypes
+ Downloaded tensorboard
+ Downloaded fonttools
+ Downloaded tensorboard-data-server
+ Downloaded grpcio
+ Downloaded tensorflow-probability
+ Downloaded cuda-bindings
+ Downloaded mujoco-mjx
+ Downloaded matplotlib
+ Downloaded nvidia-cuda-cupti-cu12
+    Updated https://github.com/CoenBuller/SocialJax (63ec4f86baca00c6df243412d1f743f4b88a7f55)
+   Building socialjax @ git+https://github.com/CoenBuller/SocialJax@63ec4f86baca00c6df243412d1f743f4b88a7f55
+ Downloaded mujoco
+ Downloaded pandas
+      Built socialjax @ git+https://github.com/CoenBuller/SocialJax@63ec4f86baca00c6df243412d1f743f4b88a7f55
+ Downloaded numpy
+ Downloaded jax-cuda12-plugin
+      Built cleanrl==0.4.8
+      Built antlr4-python3-runtime==4.9.3
+ Downloaded tensorstore
+ Downloaded wandb
+ Downloaded scipy
+ Downloaded nvidia-nvjitlink-cu12
+ Downloaded nvidia-cuda-nvcc-cu12
+ Downloaded nvidia-cuda-nvrtc-cu12
+ Downloaded jaxlib
+ Downloaded nvidia-cufft-cu12
+ Downloaded jax-cuda12-pjrt
+ Downloaded triton
+ Downloaded nvidia-nvshmem-cu12
+ Downloaded nvidia-cusolver-cu12
+ Downloaded nvidia-cusparse-cu12
+ Downloaded nvidia-cublas-cu12
+ Downloaded nvidia-nccl-cu12
+ Downloaded torch
+ Downloaded nvidia-cudnn-cu12
+Installed 145 packages in 362ms
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /home/s2631415/.netrc.
+wandb: Currently logged in as: coen-buller (magalinimario-leiden-university) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run abje8i29
+wandb: Tracking run with wandb version 0.27.2
+wandb: Run data is saved locally in /local/s2631415/SADRL/wandb/run-20261116_095903-abje8i29
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run RecurrentIPPO_gift_32_lstm
+wandb: ⭐️ View project at https://wandb.ai/coen-sadrl/sadrl
+wandb: 🚀 View run at https://wandb.ai/coen-sadrl/sadrl/runs/abje8i29
+Compiling RecurrentIPPO_gift_32_lstm training loop (this may take a few minutes)...
+Starting training on gift for 100000000 timesteps...
+2026-11-16 09:59:09.717383: W external/xla/xla/service/gpu/autotuning/dot_search_space.cc:200] All configs were filtered out because none of them sufficiently match the hints. Maybe the hints set does not contain a good representative set of valid configs?Working around this by using the full hints set instead.
+2026-11-16 09:59:09.717454: W external/xla/xla/service/gpu/autotuning/dot_search_space.cc:200] All configs were filtered out because none of them sufficiently match the hints. Maybe the hints set does not contain a good representative set of valid configs?Working around this by using the full hints set instead.
+2026-11-16 09:59:09.717545: W external/xla/xla/service/gpu/autotuning/dot_search_space.cc:200] All configs were filtered out because none of them sufficiently match the hints. Maybe the hints set does not contain a good representative set of valid configs?Working around this by using the full hints set instead.
+2026-11-16 09:59:09.717553: W external/xla/xla/service/gpu/autotuning/dot_search_space.cc:200] All configs were filtered out because none of them sufficiently match the hints. Maybe the hints set does not contain a good representative set of valid configs?Working around this by using the full hints set instead.
+2026-11-16 09:59:09.717558: W external/xla/xla/service/gpu/autotuning/dot_search_space.cc:200] All configs were filtered out because none of them sufficiently match the hints. Maybe the hints set does not contain a good representative set of valid configs?Working around this by using the full hints set instead.
+2026-11-16 09:59:09.717569: W external/xla/xla/service/gpu/autotuning/dot_search_space.cc:200] All configs were filtered out because none of them sufficiently match the hints. Maybe the hints set does not contain a good representative set of valid configs?Working around this by using the full hints set instead.
+Training complete!
+Saving metrics locally...
+Metrics saved to training_metrics_RecurrentIPPO_gift_32_lstm.csv/.npz
+2026-11-16 15:30:23.481184: E external/xla/xla/service/slow_operation_alarm.cc:73] Trying algorithm eng35{k2=4,k3=0} for conv %cudnn-conv-bias-activation.6 = (f32[5,16,11,11]{3,2,1,0}, u8[0]{0}) custom-call(%bitcast.322, %bitcast.799, %Arg_16.17), window={size=3x3 pad=1_1x1_1}, dim_labels=bf01_oi01->bf01, custom_call_target="__cudnn$convBiasActivationForward", metadata={op_name="jit(step_eval)/jit(main)/RecurrentIPPOAC/RecurrentActor_0/SmallCNN_0/Conv_0/conv_general_dilated" source_file="/local/s2631415/SADRL/.venv/lib/python3.11/site-packages/flax/linen/linear.py" source_line=695}, backend_config={"operation_queue_id":"0","wait_on_operation_queues":[],"cudnn_conv_backend_config":{"conv_result_scale":1,"activation_mode":"kRelu","side_input_scale":0,"leakyrelu_alpha":0},"force_earliest_schedule":false,"reification_cost":[]} is taking a while...
