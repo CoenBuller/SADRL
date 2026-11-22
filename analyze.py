@@ -14,13 +14,51 @@ DEFAULT_ENV_EPISODE_LENS: dict[str, float] = {
     "pd_arena": 25.0,
 }
 
-KNOWN_ALGOS = ("RecurrentMAPPO", "RecurrentIPPO", "MAPPO", "IPPO")
+KNOWN_ALGOS = ("mappo_cnn", "ippo_cnn", "RecurrentMAPPO", "RecurrentIPPO", "MAPPO", "IPPO")
 KNOWN_ENVS = ("clean_up", "gift", "pd_arena")
+IPPO_FAMILY = {"IPPO", "RecurrentIPPO", "ippo_cnn"}
+MAPPO_FAMILY = {"MAPPO", "RecurrentMAPPO", "mappo_cnn"}
 
 
 def _trapz(y: np.ndarray, x: np.ndarray) -> float:
     fn = getattr(np, "trapezoid", None) or np.trapz
     return float(fn(y, x))
+
+
+def is_cnn_algo(algo: str) -> bool:
+    return (algo or "").strip().lower().endswith("_cnn")
+
+
+def normalize_metrics_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize returned_episode_returns / returned_episode_return to rollout/episode_return."""
+    if df.empty:
+        return df
+    out = df.copy()
+    if "rollout/episode_return" not in out.columns:
+        for cand in ("returned_episode_returns", "returned_episode_return"):
+            if cand in out.columns:
+                out["rollout/episode_return"] = out[cand]
+                break
+    return out
+
+
+def scale_return_column(df: pd.DataFrame, divisor: float | None) -> pd.DataFrame:
+    """Divide rollout/episode_return by divisor when specified."""
+    if divisor is None or divisor == 1.0 or divisor <= 0.0 or df.empty:
+        return df
+    if "rollout/episode_return" not in df.columns:
+        return df
+    out = df.copy()
+    out["rollout/episode_return"] = pd.to_numeric(out["rollout/episode_return"], errors="coerce") / float(divisor)
+    return out
+
+
+def truncate_max_steps(df: pd.DataFrame, max_steps: float | None) -> pd.DataFrame:
+    """Drop rows beyond max_steps along env_step."""
+    if max_steps is None or max_steps <= 0 or "env_step" not in df.columns or df.empty:
+        return df
+    ordered = df.sort_values("env_step").reset_index(drop=True)
+    return ordered.loc[ordered["env_step"] <= float(max_steps)].reset_index(drop=True)
 
 
 def parse_env_episode_lens(spec: str | None) -> dict[str, float]:
@@ -32,32 +70,78 @@ def parse_env_episode_lens(spec: str | None) -> dict[str, float]:
         if not item or ":" not in item:
             continue
         env_key, val_str = item.split(":", 1)
-        lens[env_key.strip()] = float(val_str.strip())
+        env_key = env_key.strip()
+        if env_key in KNOWN_ENVS or spec:
+            lens[env_key] = float(val_str.strip())
     return lens
 
 
+def _normalize_algo(raw_algo: str | None, text: str) -> str | None:
+    low_text = text.lower()
+    if "mappo_cnn" in low_text:
+        return "mappo_cnn"
+    if "ippo_cnn" in low_text:
+        return "ippo_cnn"
+
+    if raw_algo:
+        raw_low = raw_algo.strip().lower()
+        if raw_low == "mappo_cnn":
+            return "mappo_cnn"
+        if raw_low == "ippo_cnn":
+            return "ippo_cnn"
+        for cand in KNOWN_ALGOS:
+            if cand.lower() == raw_low:
+                return cand
+
+    for cand in KNOWN_ALGOS:
+        if re.search(rf"(?:^|_){re.escape(cand)}(?:_|$)", text, flags=re.IGNORECASE):
+            return cand
+    return raw_algo
+
+
+def _is_rep_true(cfg: dict, run_name: str, stem: str) -> bool:
+    for key in ("USE_REP", "use_rep", "REP", "rep", "REPUTATION", "reputation"):
+        if key in cfg and cfg[key] is not None:
+            val = cfg[key]
+            if isinstance(val, dict) and "value" in val:
+                val = val["value"]
+            if isinstance(val, bool) and val:
+                return True
+            if isinstance(val, (int, float)) and val != 0:
+                return True
+            if isinstance(val, str) and val.strip().lower() in ("true", "1", "yes"):
+                return True
+
+    combined = f"{run_name}_{stem}"
+    return bool(re.search(r"(?:^|_)rep_true(?:_|$)", combined, flags=re.IGNORECASE))
+
+
 def _extract_tokens_from_stem(stem: str) -> dict:
-    """Parse stems like traininig_metrics_{algo_name}_{env_name}_{seed}_{lstm}_{pos}_history."""
+    """Parse stems like training_metrics_ippo_cnn_pd_arena_reward_common_32_history."""
     cleaned = re.sub(r"_history$", "", stem)
     cleaned = re.sub(r"^train(?:in)?ig_metrics_", "", cleaned, flags=re.IGNORECASE)
 
-    algo = None
-    for cand in KNOWN_ALGOS:
-        if re.search(rf"(?:^|_){re.escape(cand)}(?:_|$)", cleaned):
-            algo = cand
-            break
+    algo = _normalize_algo(None, cleaned)
 
     env_name = None
     for cand in KNOWN_ENVS:
-        if re.search(rf"(?:^|_){re.escape(cand)}(?:_|$)", cleaned):
+        if re.search(rf"(?:^|_){re.escape(cand)}(?:_|$)", cleaned, flags=re.IGNORECASE):
             env_name = cand
             break
 
     seed = None
     if env_name:
-        m_seed = re.search(rf"(?:^|_){re.escape(env_name)}_(\d+)(?:_|$)", cleaned)
+        m_seed = re.search(
+            rf"(?:^|_){re.escape(env_name)}(?:_[A-Za-z0-9]+)*_(\d+)(?:_|$)",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
         if m_seed:
             seed = int(m_seed.group(1))
+    if seed is None:
+        m_trailing = re.search(r"_(\d+)$", cleaned)
+        if m_trailing:
+            seed = int(m_trailing.group(1))
     if seed is None:
         m_seed_any = re.search(r"(?:^|_)(\d+)(?:_|$)", cleaned)
         if m_seed_any:
@@ -86,10 +170,11 @@ def parse_run_metadata(csv_path: Path, meta_path: Path | None, load_df: bool = T
     parsed = _extract_tokens_from_stem(stem)
     run_name = meta.get("name") or re.sub(r"_history$", "", stem)
 
-    algo = cfg.get("ALGO") or parsed["algo"]
+    cfg_algo = cfg.get("ALGO") or cfg.get("algo")
+    algo = _normalize_algo(cfg_algo, f"{run_name}_{stem}")
     if not algo:
         for cand in KNOWN_ALGOS:
-            if run_name.startswith(cand):
+            if run_name.lower().startswith(cand.lower()):
                 algo = cand
                 break
     algo = algo or "Unknown"
@@ -99,16 +184,16 @@ def parse_run_metadata(csv_path: Path, meta_path: Path | None, load_df: bool = T
     else:
         has_pos = parsed["has_pos"] or bool(re.search(r"(?:^|_)pos(?:_|$)", run_name, flags=re.IGNORECASE))
 
-    env_name = cfg.get("ENV_NAME") or parsed["env"]
+    env_name = cfg.get("ENV_NAME") or cfg.get("env_name") or parsed["env"]
     if not env_name:
-        m = re.search(r"_(clean_up|gift|pd_arena)_", run_name)
-        env_name = m.group(1) if m else "unknown"
+        m = re.search(r"_(clean_up|gift|pd_arena)_", run_name, flags=re.IGNORECASE)
+        env_name = m.group(1).lower() if m else "unknown"
 
-    seed = cfg.get("SEED")
+    seed = cfg.get("SEED") if cfg.get("SEED") is not None else cfg.get("seed")
     if seed is None:
         seed = parsed["seed"]
     if seed is None:
-        m = re.search(r"_(clean_up|gift|pd_arena)_(\d+)", run_name)
+        m = re.search(r"_(clean_up|gift|pd_arena)(?:_[A-Za-z0-9]+)*_(\d+)", run_name, flags=re.IGNORECASE)
         seed = int(m.group(2)) if m else -1
 
     info = {
@@ -117,13 +202,14 @@ def parse_run_metadata(csv_path: Path, meta_path: Path | None, load_df: bool = T
         "algo": algo,
         "has_pos": has_pos,
         "has_lstm": parsed["has_lstm"],
+        "is_rep_true": _is_rep_true(cfg, run_name, stem),
         "variant": f"{algo}+pos" if has_pos else f"{algo}+no_pos",
         "env": env_name,
         "seed": int(seed),
         "csv_path": str(csv_path),
     }
     if load_df:
-        info["df"] = pd.read_csv(csv_path)
+        info["df"] = normalize_metrics_df(pd.read_csv(csv_path))
     return info
 
 
@@ -354,6 +440,7 @@ def print_diagnostic_report(agg_df: pd.DataFrame, run_df: pd.DataFrame) -> None:
                 "ep_len",
                 "kept_rows",
                 "raw_rows",
+                "final_step",
                 "rollout/episode_return__final_mean",
                 "rollout/episode_return__all_mean",
                 "losses/entropy__final_mean",
@@ -406,13 +493,23 @@ def interpolate_to_grid(runs: list[dict], metric: str, n_points: int = 200) -> t
     return grid, aligned
 
 
-def plot_env_diagnostics(env: str, env_runs: list[dict], out_dir: Path, show_seeds: bool = True) -> None:
-    variants = sorted({r["variant"] for r in env_runs})
+def _plot_group_diagnostics(
+    group_label: str,
+    file_tag: str,
+    env: str,
+    group_runs: list[dict],
+    out_dir: Path,
+    show_seeds: bool = True,
+) -> None:
+    if not group_runs:
+        return
+
+    variants = sorted({r["variant"] for r in group_runs})
     cmap = plt.get_cmap("tab10")
     color_map = {v: cmap(i % 10) for i, v in enumerate(variants)}
 
     fig, axes = plt.subplots(2, 2, figsize=(13, 8.5), sharex=False)
-    fig.suptitle(f"Training Diagnostics (Across Seeds) — {env}", fontsize=13, fontweight="bold")
+    fig.suptitle(f"{group_label} Diagnostics (Across Seeds) — {env}", fontsize=13, fontweight="bold")
 
     panels = [
         (axes[0, 0], "rollout/episode_return", "Episode Return (seed mean ± std)", "Episode Return"),
@@ -424,7 +521,7 @@ def plot_env_diagnostics(env: str, env_runs: list[dict], out_dir: Path, show_see
     for ax, metric, title, ylabel in panels:
         plotted_any = False
         for v in variants:
-            v_runs = [r for r in env_runs if r["variant"] == v]
+            v_runs = [r for r in group_runs if r["variant"] == v]
             grid, arr = interpolate_to_grid(v_runs, metric)
             if len(grid) == 0:
                 continue
@@ -449,10 +546,10 @@ def plot_env_diagnostics(env: str, env_runs: list[dict], out_dir: Path, show_see
             ax.legend(fontsize=8, frameon=True)
 
     plt.tight_layout(rect=[0, 0, 1, 0.96])
-    plt.savefig(out_dir / f"diagnostics_{env}.png", dpi=200)
+    plt.savefig(out_dir / f"diagnostics_{file_tag}_{env}.png", dpi=200)
     plt.close(fig)
 
-    pos_runs = [r for r in env_runs if r["has_pos"] and "losses/pos_loss" in r["df"].columns]
+    pos_runs = [r for r in group_runs if r["has_pos"] and "losses/pos_loss" in r["df"].columns]
     if pos_runs:
         fig, ax = plt.subplots(figsize=(7.5, 4.5))
         for v in sorted({r["variant"] for r in pos_runs}):
@@ -470,22 +567,43 @@ def plot_env_diagnostics(env: str, env_runs: list[dict], out_dir: Path, show_see
             if np.any(std > 0):
                 ax.fill_between(grid, mean - std, mean + std, color=c, alpha=0.18)
 
-        ax.set_title(f"Auxiliary Position Loss (Across Seeds) — {env}")
+        ax.set_title(f"{group_label} Auxiliary Position Loss — {env}")
         ax.set_xlabel("env_step")
         ax.set_ylabel("losses/pos_loss")
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=8)
         plt.tight_layout()
-        plt.savefig(out_dir / f"pos_loss_{env}.png", dpi=200)
+        plt.savefig(out_dir / f"pos_loss_{file_tag}_{env}.png", dpi=200)
         plt.close(fig)
 
 
-def plot_final_return_comparison(all_runs: list[dict], out_dir: Path, tail_frac: float = 0.1) -> None:
-    envs = sorted({r["env"] for r in all_runs})
-    variants = sorted({r["variant"] for r in all_runs})
+def plot_env_diagnostics(env: str, env_runs: list[dict], out_dir: Path, show_seeds: bool = True) -> None:
+    mappo_runs = [r for r in env_runs if r["algo"] in MAPPO_FAMILY]
+    ippo_runs = [r for r in env_runs if r["algo"] in IPPO_FAMILY]
+    other_runs = [r for r in env_runs if r["algo"] not in MAPPO_FAMILY and r["algo"] not in IPPO_FAMILY]
+
+    _plot_group_diagnostics("MAPPO", "mappo", env, mappo_runs, out_dir, show_seeds=show_seeds)
+    _plot_group_diagnostics("IPPO", "ippo", env, ippo_runs, out_dir, show_seeds=show_seeds)
+    _plot_group_diagnostics("Other", "other", env, other_runs, out_dir, show_seeds=show_seeds)
+
+
+def _plot_group_final_return(
+    group_label: str,
+    file_name: str,
+    group_runs: list[dict],
+    out_dir: Path,
+    tail_frac: float = 0.1,
+) -> None:
+    if not group_runs:
+        return
+
+    envs = [e for e in KNOWN_ENVS if any(r["env"] == e for r in group_runs)]
+    if not envs:
+        envs = sorted({r["env"] for r in group_runs})
+    variants = sorted({r["variant"] for r in group_runs})
 
     rows = []
-    for r in all_runs:
+    for r in group_runs:
         df = r["df"]
         if "rollout/episode_return" not in df.columns:
             continue
@@ -535,25 +653,36 @@ def plot_final_return_comparison(all_runs: list[dict], out_dir: Path, tail_frac:
     ax.set_xticks(x)
     ax.set_xticklabels(envs)
     ax.set_ylabel(f"Final Episode Return (seed mean ± std, last {int(tail_frac * 100)}%)")
-    ax.set_title("Final Return Comparison Across Variants & Environments")
+    ax.set_title(f"{group_label} Final Return Comparison Across Variants & Environments")
     ax.grid(True, axis="y", alpha=0.3)
     ax.legend(fontsize=8, ncol=2)
     plt.tight_layout()
-    plt.savefig(out_dir / "final_return_comparison.png", dpi=200)
+    plt.savefig(out_dir / file_name, dpi=200)
     plt.close(fig)
+
+
+def plot_final_return_comparison(all_runs: list[dict], out_dir: Path, tail_frac: float = 0.1) -> None:
+    mappo_runs = [r for r in all_runs if r["algo"] in MAPPO_FAMILY]
+    ippo_runs = [r for r in all_runs if r["algo"] in IPPO_FAMILY]
+    other_runs = [r for r in all_runs if r["algo"] not in MAPPO_FAMILY and r["algo"] not in IPPO_FAMILY]
+
+    _plot_group_final_return("MAPPO", "final_return_comparison_mappo.png", mappo_runs, out_dir, tail_frac=tail_frac)
+    _plot_group_final_return("IPPO", "final_return_comparison_ippo.png", ippo_runs, out_dir, tail_frac=tail_frac)
+    _plot_group_final_return("Other", "final_return_comparison_other.png", other_runs, out_dir, tail_frac=tail_frac)
 
 
 def generate_plots(runs: list[dict], out_dir: Path, tail_frac: float = 0.1, show_seeds: bool = True) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     plot_final_return_comparison(runs, out_dir, tail_frac=tail_frac)
-    for env in sorted({r["env"] for r in runs}):
+    for env in KNOWN_ENVS:
         env_runs = [r for r in runs if r["env"] == env]
-        plot_env_diagnostics(env, env_runs, out_dir, show_seeds=show_seeds)
+        if env_runs:
+            plot_env_diagnostics(env, env_runs, out_dir, show_seeds=show_seeds)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Compute diagnostic stats and plots across MARL W&B CSVs")
-    parser.add_argument("--input_dir", type=Path, default=Path("wandb_downloads"))
+    parser.add_argument("--input_dir", type=Path, default=Path("results"))
     parser.add_argument("--out_dir", type=Path, default=Path("analysis_out"))
     parser.add_argument("--plots_dir", type=Path, default=None, help="Defaults to <out_dir>/plots")
     parser.add_argument("--tail_frac", type=float, default=0.1)
@@ -580,6 +709,33 @@ def main():
         default="all",
         help="Which algo(s) get episode-length row filtering: 'all' (default), 'MAPPO', or comma-separated algo names",
     )
+    parser.add_argument(
+        "--skip_episode_filter_algos",
+        default="mappo_cnn,ippo_cnn",
+        help="Comma-separated algos to skip episode-length row filtering on (default: 'mappo_cnn,ippo_cnn'; use 'none' to disable)",
+    )
+    parser.add_argument(
+        "--cnn_max_steps",
+        type=float,
+        default=1e8,
+        help="Truncate runs in --max_steps_algos at this env_step cap (default: 1e8; set <=0 to disable)",
+    )
+    parser.add_argument(
+        "--max_steps_algos",
+        default="mappo_cnn,ippo_cnn",
+        help="Comma-separated algos to cap at --cnn_max_steps (default: 'mappo_cnn,ippo_cnn')",
+    )
+    parser.add_argument(
+        "--cnn_return_divisor",
+        type=float,
+        default=50.0,
+        help="Divide rollout/episode_return by this factor on pd_arena for --return_divisor_algos (default: 50.0; set <=0 or 1 to disable)",
+    )
+    parser.add_argument(
+        "--return_divisor_algos",
+        default="mappo_cnn,ippo_cnn",
+        help="Comma-separated algos to divide rollout/episode_return by --cnn_return_divisor on pd_arena (default: 'mappo_cnn,ippo_cnn')",
+    )
     parser.add_argument("--comb_stride", type=int, default=1, help="Period/stride in rows for regular sawtooth filtering")
     parser.add_argument("--comb_offset", type=int, default=0, help="Phase offset within each period")
     parser.add_argument(
@@ -605,12 +761,13 @@ def main():
         default="all",
         help="Algos to apply smoothing to ('all' default, or comma-separated list like 'RecurrentMAPPO')",
     )
+    parser.add_argument("--include_rep_true", action="store_true", help="Include runs where reputation is True")
     parser.add_argument("--hide_seeds", action="store_true", help="Hide dashed individual seed lines on diagnostic plots")
     parser.add_argument("--include_crashed", action="store_true")
     parser.add_argument("--no_plots", action="store_true")
     args = parser.parse_args()
 
-    csv_files = sorted(args.input_dir.glob("*_history.csv"))
+    csv_files = sorted(args.input_dir.glob("*_history.csv")) if args.input_dir.exists() else []
     if not csv_files:
         raise FileNotFoundError(f"No '*_history.csv' files found in {args.input_dir}")
 
@@ -621,6 +778,16 @@ def main():
         if filter_mode == "all"
         else {a.strip() for a in args.filter_full_episodes_algo.split(",") if a.strip()}
     )
+
+    skip_raw = args.skip_episode_filter_algos.strip().lower()
+    skip_ep_algos = (
+        set()
+        if skip_raw in ("", "none")
+        else {a.strip() for a in args.skip_episode_filter_algos.split(",") if a.strip()}
+    )
+
+    max_step_algos = {a.strip() for a in args.max_steps_algos.split(",") if a.strip()}
+    divisor_algos = {a.strip() for a in args.return_divisor_algos.split(",") if a.strip()}
 
     comb_mode = args.comb_algos.strip().lower()
     comb_targets = (
@@ -644,12 +811,31 @@ def main():
         info = parse_run_metadata(csv_path, meta_path if meta_path.exists() else None, load_df=True)
         if not args.include_crashed and info["state"] == "crashed":
             continue
+        if not args.include_rep_true and info["is_rep_true"]:
+            continue
+        if info["env"] not in KNOWN_ENVS:
+            continue
         df = info["df"]
         if df.empty:
             continue
 
+        if args.cnn_max_steps and args.cnn_max_steps > 0 and info["algo"] in max_step_algos:
+            df = truncate_max_steps(df, args.cnn_max_steps)
+
+        if (
+            args.cnn_return_divisor
+            and args.cnn_return_divisor > 0
+            and info["env"] == "pd_arena"
+            and (info["algo"] in divisor_algos or is_cnn_algo(info["algo"]))
+        ):
+            df = scale_return_column(df, args.cnn_return_divisor)
+
         ep_len = args.episode_len if args.episode_len is not None else env_lens.get(info["env"])
-        apply_ep_filter = ep_len is not None and (target_algos is None or info["algo"] in target_algos)
+        apply_ep_filter = (
+            ep_len is not None
+            and info["algo"] not in skip_ep_algos
+            and (target_algos is None or info["algo"] in target_algos)
+        )
         if apply_ep_filter:
             df, raw_n, kept_n = filter_full_episode_rows(df, ep_len, num_envs=args.num_envs)
         else:
