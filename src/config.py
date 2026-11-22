@@ -9,6 +9,7 @@ class Config:
     N_ENVS: int = 100
     TOTAL_TIMESTEPS: int = int(1e8)
     NUM_STEPS: int = 100
+    INNER_STEPS: int | None = None
     SEED: int = 30
     MAP_H: int | None = None
     MAP_W: int | None = None

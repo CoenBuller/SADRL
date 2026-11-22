@@ -17,9 +17,23 @@ class Environment:
             seed: int=30,
             map_h: None | int = None,
             map_w: None | int = None,
+            inner_steps: None | int = None,
             ):
         """Wrapper class to interact with a specific SocialJax environment"""
-        self.env = sj.make(env_id=env_name, num_agents=n_agents, shared_rewards=False)
+
+        if inner_steps is not None:
+            self.env = sj.make(
+                env_id=env_name,
+                num_agents=n_agents,
+                shared_rewards=False,
+                inner_steps=inner_steps,
+            )
+        else:
+            self.env = sj.make(
+                env_id=env_name,
+                num_agents=n_agents,
+                shared_rewards=False,
+            )
         self.seed = seed
         self.n_envs = n_envs
         self.n_agents = n_agents
@@ -33,6 +47,7 @@ class Environment:
         self.own_pos = own_pos
         self.add_rep = self.make_reputation_channel(n_agents=self.n_agents, view_hw=self.obs_space[:2], own_pos=own_pos)
         self.map_h, self.map_w = map_h, map_w
+
     def _stack(self, x):
         if isinstance(x, dict):
             if self.agents[0] in x:

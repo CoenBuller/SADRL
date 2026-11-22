@@ -48,6 +48,7 @@ def main():
     p.add_argument("--total_timesteps", type=int, default=None)
     p.add_argument("--n_agents", type=int, default=None)
     p.add_argument("--lstm", type=_BOOL, default=None)
+    p.add_argument("--inner_steps", type=int, default=None)
     args = p.parse_args()
 
     # 1. Load YAML overrides (if provided)
@@ -84,6 +85,8 @@ def main():
         cli_overrides["N_AGENTS"] = args.n_agents
     if args.lstm is not None:
         cli_overrides["LSTM"] = args.lstm
+    if args.inner_steps is not None:
+        cli_overrides["INNER_STEPS"] = args.inner_steps
 
     # 3. Merge hierarchy: Config() -> YAML -> CLI
     merged_overrides = {**yaml_overrides, **cli_overrides}

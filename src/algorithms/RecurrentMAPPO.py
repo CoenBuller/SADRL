@@ -36,6 +36,7 @@ def make_train_recurrent(config):
         decay_coef=config["REP_DECAY"],
         map_h=config["MAP_H"],
         map_w=config["MAP_W"],
+        inner_steps=config.get("INNER_STEPS"),
     )
 
     num_agents = env.n_agents

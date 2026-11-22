@@ -29,6 +29,7 @@ N_AGENTS="${N_AGENTS:-7}"
 NUM_STEPS="${NUM_STEPS:-}"                  # empty = use the value from the YAML
 LSTM="${LSTM:-}"                            # global override; empty = use per-variant or YAML value
 PREDICT_NEXT_STATE="${PREDICT_NEXT_STATE:-}" # empty = use the value from the YAML
+INNER_STEPS="${INNER_STEPS:-}"
 
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 export PYTHONUNBUFFERED=1
@@ -59,6 +60,7 @@ run_one() {
     [ -n "$NUM_STEPS" ] && extra+=(--num_steps "$NUM_STEPS")
     [ -n "$lstm_val" ] && extra+=(--lstm "$lstm_val")
     [ -n "$PREDICT_NEXT_STATE" ] && extra+=(--predict_next_state "$PREDICT_NEXT_STATE")
+    [ -n "$INNER_STEPS" ] && extra+=(--inner_steps "$INNER_STEPS")
 
     echo "[$(date +%H:%M:%S)] START $name -> $log"
     uv run main.py --config "$CONFIG" --algo "$algo" --predict_pos "$pos" \

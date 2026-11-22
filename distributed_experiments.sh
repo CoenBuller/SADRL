@@ -4,15 +4,20 @@
 REPO_URL="git@github.com:CoenBuller/SADRL.git"
 REPO_DIR="/local/s2631415/SADRL"
 LOG_FILE="active_deployments.log"
-CONFIG_FILE="experiments/next_emb.yaml"
+CONFIG_FILE="experiments/recurrent.yaml"
 
 EXPERIMENTS=(
-    "CONFIG=\"$CONFIG_FILE\" PREDICT_NEXT_STATE=true SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:true:true\" ENV_NAME=clean_up N_AGENTS=7 NUM_STEPS=100"
-    "CONFIG=\"$CONFIG_FILE\" PREDICT_NEXT_STATE=true SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:false:true\" ENV_NAME=clean_up N_AGENTS=7 NUM_STEPS=100"
-    "CONFIG=\"$CONFIG_FILE\" PREDICT_NEXT_STATE=true SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:true:true\" ENV_NAME=gift N_AGENTS=5 NUM_STEPS=100"
-    "CONFIG=\"$CONFIG_FILE\" PREDICT_NEXT_STATE=true SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:false:true\" ENV_NAME=gift N_AGENTS=5 NUM_STEPS=100"
-    "CONFIG=\"$CONFIG_FILE\" PREDICT_NEXT_STATE=true SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:true:true\" ENV_NAME=pd_arena N_AGENTS=4 NUM_STEPS=25"
-    "CONFIG=\"$CONFIG_FILE\" PREDICT_NEXT_STATE=true SEEDS=\"30 31 32\" VARIANTS=\"RecurrentIPPO:false:true\" ENV_NAME=pd_arena N_AGENTS=4 NUM_STEPS=25"
+    # gift: RecurrentMAPPO (no_pos) — LSTM & GRU
+    "CONFIG=\"$CONFIG_FILE\" PREDICT_NEXT_STATE=false SEEDS=\"30 31 32\" VARIANTS=\"RecurrentMAPPO:false:true\" ENV_NAME=gift N_AGENTS=5 NUM_STEPS=100"
+    "CONFIG=\"$CONFIG_FILE\" PREDICT_NEXT_STATE=false SEEDS=\"30 31 32\" VARIANTS=\"RecurrentMAPPO:false:false\" ENV_NAME=gift N_AGENTS=5 NUM_STEPS=100"
+
+    # pd_arena: RecurrentMAPPO (no_pos) with 1000-step horizon — LSTM & GRU
+    "CONFIG=\"$CONFIG_FILE\" PREDICT_NEXT_STATE=false SEEDS=\"30 31 32\" VARIANTS=\"RecurrentMAPPO:false:true\" ENV_NAME=pd_arena N_AGENTS=4 NUM_STEPS=100 INNER_STEPS=1000"
+    "CONFIG=\"$CONFIG_FILE\" PREDICT_NEXT_STATE=false SEEDS=\"30 31 32\" VARIANTS=\"RecurrentMAPPO:false:false\" ENV_NAME=pd_arena N_AGENTS=4 NUM_STEPS=100 INNER_STEPS=1000"
+
+    # pd_arena: RecurrentMAPPO (+pos) with 1000-step horizon — LSTM & GRU
+    "CONFIG=\"$CONFIG_FILE\" PREDICT_NEXT_STATE=false SEEDS=\"30 31 32\" VARIANTS=\"RecurrentMAPPO:true:true\" ENV_NAME=pd_arena N_AGENTS=4 NUM_STEPS=100 INNER_STEPS=1000"
+    "CONFIG=\"$CONFIG_FILE\" PREDICT_NEXT_STATE=false SEEDS=\"30 31 32\" VARIANTS=\"RecurrentMAPPO:true:false\" ENV_NAME=pd_arena N_AGENTS=4 NUM_STEPS=100 INNER_STEPS=1000"
 )
 
 PREFIX="00650"
