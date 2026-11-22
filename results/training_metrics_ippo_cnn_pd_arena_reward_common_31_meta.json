@@ -1,0 +1,59 @@
+{
+  "id": "e4rygzzb",
+  "name": "ippo_cnn_pd_arena_reward_common",
+  "seed": "31",
+  "state": "finished",
+  "url": "https://wandb.ai/coen-sadrl/sadrl/runs/e4rygzzb",
+  "created_at": "2026-10-08T13:30:51Z",
+  "config": {
+    "ACTIVATION": "relu",
+    "ANNEAL_LR": true,
+    "CLIP_EPS": 0.2,
+    "ENTITY": "coen-sadrl",
+    "ENT_COEF": 0.01,
+    "ENV_KWARGS": {
+      "cnn": true,
+      "jit": true,
+      "num_agents": 4,
+      "num_inner_steps": 1000,
+      "shared_rewards": true
+    },
+    "ENV_NAME": "pd_arena",
+    "GAE_LAMBDA": 0.95,
+    "GAMMA": 0.99,
+    "GIF_NUM_FRAMES": 250,
+    "LR": 0.0005,
+    "MAX_GRAD_NORM": 0.5,
+    "NUM_ENVS": 256,
+    "NUM_MINIBATCHES": 500,
+    "NUM_SEEDS": 1,
+    "NUM_STEPS": 1000,
+    "PARAMETER_SHARING": true,
+    "PROJECT": "sadrl",
+    "REWARD": "common",
+    "REW_SHAPING_HORIZON": 2500000,
+    "SEED": 31,
+    "SHAPING_BEGIN": 1000000,
+    "TOTAL_TIMESTEPS": 300000000,
+    "TUNE": false,
+    "UPDATE_EPOCHS": 2,
+    "VF_COEF": 0.5,
+    "WANDB_MODE": "online",
+    "WANDB_TAGS": [
+      "COMMON_REWARD"
+    ]
+  },
+  "summary": {
+    "Episode GIF": "{'_type': 'video-file', 'caption': 'Evaluation Episode', 'path': 'media/videos/Episode GIF_1171_1941f2e8920fa2659276.gif', 'sha256': '1941f2e8920fa2659276f950244df2653129af68ed08ca88fea8b1b800513b5e', 'size': 795030}",
+    "_runtime": 5025,
+    "_step": 1171,
+    "_timestamp": 1791471276.9033709,
+    "_wandb.runtime": 5025,
+    "eat_coop_tokens_number": 45.074222564697266,
+    "env_step": 299776000,
+    "returned_episode": 0.0010000000474974513,
+    "returned_episode_lengths": 1000.0000610351562,
+    "returned_episode_returns": 258.96002197265625,
+    "update_step": 1171
+  }
+}

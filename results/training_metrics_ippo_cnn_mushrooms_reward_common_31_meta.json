@@ -1,0 +1,61 @@
+{
+  "id": "o2ur3v24",
+  "name": "ippo_cnn_mushrooms_reward_common",
+  "seed": "31",
+  "state": "finished",
+  "url": "https://wandb.ai/coen-sadrl/sadrl/runs/o2ur3v24",
+  "created_at": "2026-10-08T14:41:28Z",
+  "config": {
+    "ACTIVATION": "relu",
+    "ANNEAL_LR": true,
+    "CLIP_EPS": 0.2,
+    "ENTITY": "coen-sadrl",
+    "ENT_COEF": 0.01,
+    "ENV_KWARGS": {
+      "cnn": true,
+      "jit": true,
+      "num_agents": 5,
+      "num_inner_steps": 1000,
+      "shared_rewards": true
+    },
+    "ENV_NAME": "mushrooms",
+    "GAE_LAMBDA": 0.95,
+    "GAMMA": 0.99,
+    "GIF_NUM_FRAMES": 250,
+    "LR": 0.0001,
+    "MAX_GRAD_NORM": 0.5,
+    "NUM_ENVS": 256,
+    "NUM_MINIBATCHES": 500,
+    "NUM_SEEDS": 1,
+    "NUM_STEPS": 1000,
+    "PARAMETER_SHARING": true,
+    "PROJECT": "sadrl",
+    "REWARD": "common",
+    "REW_SHAPING_HORIZON": 2500000,
+    "SEED": 31,
+    "SHAPING_BEGIN": 1000000,
+    "TOTAL_TIMESTEPS": 300000000,
+    "TUNE": false,
+    "UPDATE_EPOCHS": 2,
+    "VF_COEF": 0.5,
+    "WANDB_MODE": "online",
+    "WANDB_TAGS": [
+      "COMMON_REWARD"
+    ]
+  },
+  "summary": {
+    "Episode GIF": "{'_type': 'video-file', 'caption': 'Evaluation Episode', 'path': 'media/videos/Episode GIF_1171_87aee308747adb70ebed.gif', 'sha256': '87aee308747adb70ebed921d33fea349bf3912903ec58862006d0ead0a627b57', 'size': 624099}",
+    "_runtime": 5601,
+    "_step": 1171,
+    "_timestamp": 1791476090.17662,
+    "_wandb.runtime": 5601,
+    "eat_blue_mushrooms": 17.248435974121094,
+    "env_step": 299776000,
+    "original_rewards": 0.39433592557907104,
+    "returned_episode": 0.0009999999310821295,
+    "returned_episode_lengths": 1000,
+    "returned_episode_returns": 387.36602783203125,
+    "shaped_rewards": 0.39433592557907104,
+    "update_step": 1171
+  }
+}

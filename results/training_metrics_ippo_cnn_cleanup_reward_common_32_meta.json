@@ -1,0 +1,63 @@
+{
+  "id": "wfdsdw07",
+  "name": "ippo_cnn_cleanup_reward_common",
+  "seed": "32",
+  "state": "finished",
+  "url": "https://wandb.ai/coen-sadrl/sadrl/runs/wfdsdw07",
+  "created_at": "2026-10-08T18:15:09Z",
+  "config": {
+    "ACTIVATION": "relu",
+    "ANNEAL_LR": true,
+    "CLIP_EPS": 0.2,
+    "ENTITY": "coen-sadrl",
+    "ENT_COEF": 0.01,
+    "ENV_KWARGS": {
+      "cnn": true,
+      "jit": true,
+      "num_agents": 7,
+      "num_inner_steps": 1000,
+      "shared_rewards": true
+    },
+    "ENV_NAME": "clean_up",
+    "GAE_LAMBDA": 0.95,
+    "GAMMA": 0.99,
+    "GIF_NUM_FRAMES": 250,
+    "LR": 0.0005,
+    "MAX_GRAD_NORM": 0.5,
+    "NUM_ENVS": 256,
+    "NUM_MINIBATCHES": 500,
+    "NUM_SEEDS": 1,
+    "NUM_STEPS": 1000,
+    "PARAMETER_SHARING": true,
+    "PROJECT": "sadrl",
+    "REWARD": "common",
+    "REW_SHAPING_HORIZON": 2500000,
+    "SEED": 32,
+    "SHAPING_BEGIN": 1000000,
+    "TOTAL_TIMESTEPS": 300000000,
+    "TUNE": false,
+    "UPDATE_EPOCHS": 2,
+    "VF_COEF": 0.5,
+    "WANDB_MODE": "online",
+    "WANDB_TAGS": [
+      "COMMON_REWARD"
+    ]
+  },
+  "summary": {
+    "Episode GIF": "{'_type': 'video-file', 'caption': 'Evaluation Episode', 'path': 'media/videos/Episode GIF_1171_dad9c6c62dc5b3e00193.gif', 'sha256': 'dad9c6c62dc5b3e00193359c85927c2f5d68b4c1a6beef72c21d02168cc6c962', 'size': 2503072}",
+    "_runtime": 8161,
+    "_step": 1171,
+    "_timestamp": 1791491471.0565302,
+    "_wandb.runtime": 8161,
+    "clean_action_info": 133.2572479248047,
+    "cleaned_water": 92.0740737915039,
+    "env_step": 299776000,
+    "original_rewards": 0.09737443923950195,
+    "returned_episode": 0.0009999999310821295,
+    "returned_episode_lengths": 1000,
+    "returned_episode_returns": 684.0674438476562,
+    "shaped_rewards": 0.6816210746765137,
+    "update_step": 1171,
+    "waste_cleared": 92.0740737915039
+  }
+}
