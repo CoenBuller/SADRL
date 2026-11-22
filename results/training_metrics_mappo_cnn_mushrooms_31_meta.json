@@ -1,0 +1,59 @@
+{
+  "id": "r2y33i45",
+  "name": "mappo_cnn_mushrooms",
+  "seed": "31",
+  "state": "finished",
+  "url": "https://wandb.ai/coen-sadrl/sadrl/runs/r2y33i45",
+  "created_at": "2026-10-10T20:36:27Z",
+  "config": {
+    "ACTIVATION": "relu",
+    "ANNEAL_LR": true,
+    "CLIP_EPS": 0.2,
+    "ENTITY": "coen-sadrl",
+    "ENT_COEF": 0.01,
+    "ENV_KWARGS": {
+      "cnn": true,
+      "jit": true,
+      "num_agents": 5,
+      "num_inner_steps": 1000,
+      "shared_rewards": true
+    },
+    "ENV_NAME": "mushrooms",
+    "GAE_LAMBDA": 0.95,
+    "GAMMA": 0.99,
+    "GIF_NUM_FRAMES": 250,
+    "LR": 0.001,
+    "MAX_GRAD_NORM": 0.5,
+    "NUM_ENVS": 100,
+    "NUM_MINIBATCHES": 4,
+    "NUM_SEEDS": 1,
+    "NUM_STEPS": 100,
+    "PROJECT": "sadrl",
+    "REWARD": "MAPPO",
+    "REW_SHAPING_HORIZON": 2500000,
+    "SCALE_CLIP_EPS": true,
+    "SEED": 31,
+    "TOTAL_TIMESTEPS": 300000000,
+    "TUNE": false,
+    "UPDATE_EPOCHS": 2,
+    "VF_COEF": 0.5,
+    "WANDB_MODE": "online",
+    "WANDB_TAGS": [
+      "COMMON_REWARD"
+    ]
+  },
+  "summary": {
+    "_runtime": 4809,
+    "_step": 29999,
+    "_timestamp": 1791669167.322684,
+    "_wandb.runtime": 4809,
+    "eat_blue_mushrooms": 20.579999923706055,
+    "env_step": 300000000,
+    "original_rewards": 0.4511999785900116,
+    "returned_episode": 0.009999999776482582,
+    "returned_episode_lengths": 1000,
+    "returned_episode_returns": 515.3294067382812,
+    "shaped_rewards": 0.4511999785900116,
+    "update_steps": 30000
+  }
+}

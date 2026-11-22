@@ -1,0 +1,61 @@
+{
+  "id": "ixowyz8r",
+  "name": "mappo_cnn_cleanup",
+  "seed": "32",
+  "state": "finished",
+  "url": "https://wandb.ai/coen-sadrl/sadrl/runs/ixowyz8r",
+  "created_at": "2026-10-11T07:43:27Z",
+  "config": {
+    "ACTIVATION": "relu",
+    "ANNEAL_LR": true,
+    "CLIP_EPS": 0.2,
+    "ENTITY": "coen-sadrl",
+    "ENT_COEF": 0.01,
+    "ENV_KWARGS": {
+      "cnn": true,
+      "jit": true,
+      "num_agents": 7,
+      "num_inner_steps": 1000,
+      "shared_rewards": true
+    },
+    "ENV_NAME": "clean_up",
+    "GAE_LAMBDA": 0.95,
+    "GAMMA": 0.99,
+    "GIF_NUM_FRAMES": 250,
+    "LR": 0.001,
+    "MAX_GRAD_NORM": 0.5,
+    "NUM_ENVS": 100,
+    "NUM_MINIBATCHES": 4,
+    "NUM_SEEDS": 1,
+    "NUM_STEPS": 100,
+    "PROJECT": "sadrl",
+    "REWARD": "MAPPO",
+    "REW_SHAPING_HORIZON": 2500000,
+    "SCALE_CLIP_EPS": true,
+    "SEED": 32,
+    "TOTAL_TIMESTEPS": 300000000,
+    "TUNE": false,
+    "UPDATE_EPOCHS": 2,
+    "VF_COEF": 0.5,
+    "WANDB_MODE": "online",
+    "WANDB_TAGS": [
+      "COMMON_REWARD"
+    ]
+  },
+  "summary": {
+    "_runtime": 9436,
+    "_step": 29999,
+    "_timestamp": 1791713666.3995874,
+    "_wandb.runtime": 9436,
+    "clean_action_info": 80.85713958740234,
+    "cleaned_water": 126.47940063476562,
+    "env_step": 300000000,
+    "original_rewards": 0.4124285578727722,
+    "returned_episode": 0.009999999776482582,
+    "returned_episode_lengths": 1000,
+    "returned_episode_returns": 2684.936279296875,
+    "shaped_rewards": 2.88700008392334,
+    "update_steps": 30000,
+    "waste_cleared": 126.47940063476562
+  }
+}

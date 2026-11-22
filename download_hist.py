@@ -11,6 +11,32 @@ def sanitize_filename(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_") or "run"
 
 
+def _unwrap_val(v):
+    return v["value"] if isinstance(v, dict) and "value" in v else v
+
+
+def extract_seed(run) -> str | None:
+    """Extract seed from run config or fallback to run name."""
+    raw_cfg = dict(run.config) if isinstance(run.config, dict) else {}
+    cfg = {k: _unwrap_val(v) for k, v in raw_cfg.items()}
+
+    for key in ("SEED", "seed", "rng_seed", "env_seed"):
+        val = cfg.get(key)
+        if val is not None and str(val).strip() != "":
+            return sanitize_filename(str(val))
+
+    name = run.name or ""
+    m = re.search(r"_(clean_up|gift|pd_arena|mushrooms)_(\d+)(?:_|$)", name)
+    if m:
+        return m.group(2)
+
+    m_any = re.search(r"(?:^|_)(\d+)(?:_|$)", name)
+    if m_any:
+        return m_any.group(1)
+
+    return None
+
+
 def resolve_run(api: wandb.Api, project_path: str, identifier: str, state: str | None = None):
     """Look up a run by W&B run ID first, then fall back to display_name."""
     try:
@@ -24,7 +50,6 @@ def resolve_run(api: wandb.Api, project_path: str, identifier: str, state: str |
 
     runs = list(api.runs(project_path, filters=filters, order="-created_at"))
     if not runs and state:
-        # Retry without state filter so the user gets a helpful error if a run crashed/is running
         runs = list(api.runs(project_path, filters={"display_name": identifier}, order="-created_at"))
 
     if not runs:
@@ -41,6 +66,35 @@ def resolve_run(api: wandb.Api, project_path: str, identifier: str, state: str |
     return runs[0]
 
 
+def find_cnn_runs(api: wandb.Api, project_path: str, cnn_prefix: str, state: str | None = None):
+    """Find runs matching a CNN prefix (e.g. mappo_cnn, ippo_cnn, svo_cnn) or 'all' CNN runs."""
+    filters: dict = {}
+    if state:
+        filters["state"] = state
+
+    target = cnn_prefix.strip().lower()
+    matches = []
+    for r in api.runs(project_path, filters=filters, order="-created_at"):
+        run_name = (r.name or "").lower()
+        if target == "all":
+            if "_cnn" in run_name or run_name.endswith("cnn"):
+                matches.append(r)
+        elif run_name.startswith(target):
+            matches.append(r)
+
+    return matches
+
+
+def build_output_prefix(run) -> str:
+    safe_name = sanitize_filename(run.name)
+    seed = extract_seed(run)
+    if seed and not re.search(rf"(?:^|_){re.escape(seed)}(?:_|$)", safe_name):
+        stem = f"{safe_name}_{seed}"
+    else:
+        stem = safe_name
+    return f"training_metrics_{stem}"
+
+
 def download_history(
     run,
     out_dir: Path,
@@ -49,11 +103,9 @@ def download_history(
     samples: int | None = None,
 ) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
-    safe_name = sanitize_filename(run.name)
-    prefix = f"training_metrics_{safe_name}"
+    prefix = build_output_prefix(run)
 
     if keys:
-        # scan_history is exact (not subsampled) and supports specific metric keys
         rows = list(run.scan_history(keys=keys))
         df = pd.DataFrame(rows)
     elif samples is not None:
@@ -78,6 +130,7 @@ def download_history(
     meta = {
         "id": run.id,
         "name": run.name,
+        "seed": extract_seed(run),
         "state": run.state,
         "url": run.url,
         "created_at": run.created_at,
@@ -92,7 +145,16 @@ def download_history(
 
 def main():
     parser = argparse.ArgumentParser(description="Download W&B run history")
-    parser.add_argument("runs", nargs="+", help="Run ID(s) or display name(s), e.g. RecurrentIPPO_clean_up_30_lstm_nextemb")
+    parser.add_argument(
+        "runs",
+        nargs="*",
+        help="Optional run ID(s) or display name(s)",
+    )
+    parser.add_argument(
+        "--cnn_prefix",
+        default=None,
+        help="Download matching CNN runs by prefix (e.g. mappo_cnn, ippo_cnn, svo_cnn, or 'all')",
+    )
     parser.add_argument("--entity", default="coen-sadrl")
     parser.add_argument("--project", default="sadrl")
     parser.add_argument("--out_dir", type=Path, default=Path("results"))
@@ -102,11 +164,31 @@ def main():
     parser.add_argument("--state", default=None, help="Optional state filter when matching by name (e.g. finished)")
     args = parser.parse_args()
 
+    if not args.runs and not args.cnn_prefix:
+        parser.error("Provide at least one run ID/name or pass --cnn_prefix (e.g. mappo_cnn, ippo_cnn, svo_cnn, all).")
+
     api = wandb.Api()
     project_path = f"{args.entity}/{args.project}"
 
+    targets = []
+    seen_ids: set[str] = set()
+
+    if args.cnn_prefix:
+        cnn_runs = find_cnn_runs(api, project_path, args.cnn_prefix, state=args.state)
+        if not cnn_runs:
+            raise ValueError(f"No CNN runs found in '{project_path}' matching --cnn_prefix '{args.cnn_prefix}'.")
+        for r in cnn_runs:
+            if r.id not in seen_ids:
+                seen_ids.add(r.id)
+                targets.append(r)
+
     for ident in args.runs:
-        run = resolve_run(api, project_path, ident, state=args.state)
+        r = resolve_run(api, project_path, ident, state=args.state)
+        if r.id not in seen_ids:
+            seen_ids.add(r.id)
+            targets.append(r)
+
+    for run in targets:
         saved_path = download_history(
             run=run,
             out_dir=args.out_dir,
@@ -114,7 +196,7 @@ def main():
             keys=args.keys,
             samples=args.samples,
         )
-        print(f"Downloaded '{run.name}' (id={run.id}, state={run.state}) -> {saved_path}")
+        print(f"Downloaded '{run.name}' (seed={extract_seed(run)}, state={run.state}) -> {saved_path}")
 
 
 if __name__ == "__main__":
