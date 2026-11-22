@@ -10,7 +10,7 @@ MAP_W: null
 
 # Storage
 WANDB: true
-GIF_FRAMES: 1000
+GIF_FRAMES: 0
 OUT_DIR: "results"
 
 # Reputation
