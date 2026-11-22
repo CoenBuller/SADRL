@@ -5,7 +5,8 @@ import wandb
 from pathlib import Path
 from PIL import Image
 
-from src.networks.networks2 import MAPPOAC, RecurrentMAPPOAC, RecurrentIPPOAC, LSTM, GRU
+from src.networks.networks import MAPPOAC
+from src.networks.networks2 import RecurrentMAPPOAC, RecurrentIPPOAC, LSTM, GRU
 from src.algorithms.MAPPO import make_world_state
 from src.environments.env_wrapper import Environment
 
@@ -20,12 +21,16 @@ def make_gif(params, config, num_frames=1000, out_dir="evaluation"):
         reputation=config["REPUTATION"],
         own_pos=tuple(config["OWN_POS"]),
         decay_coef=config["REP_DECAY"],
+        map_h=config.get("MAP_H"),
+        map_w=config.get("MAP_W"),
+        inner_steps=config.get("INNER_STEPS"),
     )
     action_dim = env.env.action_space(0).n
     num_agents = env.n_agents
     algo = config["ALGO"]
     use_lstm = config.get("LSTM", False)
     predict_pos = config.get("PREDICT_POS", False)
+    predict_next_state = config.get("PREDICT_NEXT_STATE", False)
 
     rng = jax.random.PRNGKey(config["SEED"])
     obs, (state, rep), rng = env.initialize(rng)
@@ -53,6 +58,7 @@ def make_gif(params, config, num_frames=1000, out_dir="evaluation"):
             small=config["SMALL"],
             activation=config["ACTIVATION"],
             predict_pos=predict_pos,
+            predict_next_state=predict_next_state,
             lstm=use_lstm,
         )
         hidden = (
@@ -68,7 +74,8 @@ def make_gif(params, config, num_frames=1000, out_dir="evaluation"):
             world_batch = make_world_state(obs, 1, num_agents)
             actor_obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], (obs_batch, last_done, last_action))
             world_batch_t = world_batch[None, ...]
-            new_hidden, pi, _, _ = network.apply(params, hidden, actor_obs_t, world_batch_t)
+            out = network.apply(params, hidden, actor_obs_t, world_batch_t)
+            new_hidden, pi = out[0], out[1]
             action = pi.sample(seed=k_act).squeeze(0)
             actions_env = action.reshape((1, num_agents))
             next_obs, (next_state, next_rep), _, done, _ = env.step(k_step, actions_env, (state, rep))
@@ -81,6 +88,7 @@ def make_gif(params, config, num_frames=1000, out_dir="evaluation"):
             hidden_dim=config["HIDDEN_DIM"],
             activation=config["ACTIVATION"],
             predict_pos=predict_pos,
+            predict_next_state=predict_next_state,
             lstm=use_lstm,
         )
         if use_lstm:
@@ -96,7 +104,8 @@ def make_gif(params, config, num_frames=1000, out_dir="evaluation"):
             rng, k_act, k_step = jax.random.split(rng, 3)
             obs_batch = obs.reshape((num_agents, *obs.shape[2:]))
             obs_t = jax.tree_util.tree_map(lambda x: x[None, ...], (obs_batch, last_done, last_action))
-            new_hidden, pi, _, _ = network.apply(params, hidden, obs_t)
+            out = network.apply(params, hidden, obs_t)
+            new_hidden, pi = out[0], out[1]
             action = pi.sample(seed=k_act).squeeze(0)
             actions_env = action.reshape((1, num_agents))
             next_obs, (next_state, next_rep), _, done, _ = env.step(k_step, actions_env, (state, rep))
@@ -118,7 +127,8 @@ def make_gif(params, config, num_frames=1000, out_dir="evaluation"):
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     pos_tag = "_pos" if predict_pos else ""
     lstm_tag = "_lstm" if use_lstm else ""
-    path = f"{out_dir}/{config['ALGO']}_{config['ENV_NAME']}_{num_agents}agents_seed{config['SEED']}_{config['REPUTATION']}{pos_tag}{lstm_tag}.gif"
+    nextemb_tag = "_nextemb" if predict_next_state else ""
+    path = f"{out_dir}/{config['ALGO']}_{config['ENV_NAME']}_{num_agents}agents_seed{config['SEED']}_{config['REPUTATION']}{pos_tag}{lstm_tag}{nextemb_tag}.gif"
 
     imgs = [Image.fromarray(np.array(f)) for f in frames]
     imgs[0].save(path, format="GIF", save_all=True, append_images=imgs[1:], duration=200, loop=0)
