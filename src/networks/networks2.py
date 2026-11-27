@@ -136,15 +136,14 @@ class RecurrentActor(nn.Module):
     lstm: bool = False
 
     @nn.compact
-    def __call__(self, hidden, x):
+    def __call__(self, hidden, x, curr_actions=None):
         obs, dones, last_actions = x
         activation = nn.relu if self.activation == "relu" else nn.tanh
 
         zt = SmallCNN(activation=self.activation)(obs)
         oh_last_action = jax.nn.one_hot(last_actions, num_classes=self.action_dim)
         oh_last_action = jnp.where(dones[..., None] > 0.5, 0.0, oh_last_action)
-        rnn_in = jnp.concatenate([jax.lax.stop_gradient(zt), oh_last_action], axis=-1)
-
+        rnn_in = jnp.concatenate([zt, oh_last_action], axis=-1)
         if self.lstm:
             new_hidden, rnn_out = LSTM(hidden_dim=self.hidden_dim)(hidden, (rnn_in, dones))
         else:
@@ -164,9 +163,14 @@ class RecurrentActor(nn.Module):
 
         next_state_out = None
         if self.predict_next_state:
-            # Predict next step's local embedding z_{t+1} from rnn_out;
+            # Predict next step's local embedding z_{t+1} from (rnn_out, a_t);
             # target z_{t+1} is stop_gradient'd so SmallCNN doesn't collapse.
-            h_next = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(rnn_out)
+            if curr_actions is not None:
+                oh_curr_action = jax.nn.one_hot(curr_actions, num_classes=self.action_dim)
+            else:
+                oh_curr_action = jnp.zeros((*rnn_out.shape[:-1], self.action_dim), dtype=rnn_out.dtype)
+            next_in = jnp.concatenate([rnn_out, oh_curr_action], axis=-1)
+            h_next = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(next_in)
             h_next = activation(h_next)
             pred_next_emb = nn.Dense(
                 zt.shape[-1], kernel_init=orthogonal(1.0), bias_init=constant(0.0)
@@ -180,20 +184,22 @@ class RecurrentActor(nn.Module):
 class RecurrentCritic(nn.Module):
     activation: str = "relu"
     hidden_dim: int = 64
+    action_dim: int = 8
     predict_pos: bool = False
+    predict_next_state: bool = False
     lstm: bool = False
 
     @nn.compact
-    def __call__(self, hidden, x):
+    def __call__(self, hidden, x, curr_actions=None):
         obs, dones, _ = x
         activation = nn.relu if self.activation == "relu" else nn.tanh
 
-        rnn_in = SmallCNN(activation=self.activation)(obs)
+        zt = SmallCNN(activation=self.activation)(obs)
 
         if self.lstm:
-            new_hidden, rnn_out = LSTM(hidden_dim=self.hidden_dim)(hidden, (rnn_in, dones))
+            new_hidden, rnn_out = LSTM(hidden_dim=self.hidden_dim)(hidden, (zt, dones))
         else:
-            new_hidden, rnn_out = GRU(hidden_dim=self.hidden_dim)(hidden, (rnn_in, dones))
+            new_hidden, rnn_out = GRU(hidden_dim=self.hidden_dim)(hidden, (zt, dones))
 
         hidden_critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(rnn_out)
         hidden_critic = activation(hidden_critic)
@@ -207,7 +213,22 @@ class RecurrentCritic(nn.Module):
             p = nn.Dense(2, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(p)
             pos_pred = nn.sigmoid(p)
 
-        return new_hidden, value, pos_pred
+        next_state_out = None
+        if self.predict_next_state:
+            if curr_actions is not None:
+                oh_curr_action = jax.nn.one_hot(curr_actions, num_classes=self.action_dim)
+            else:
+                oh_curr_action = jnp.zeros((*rnn_out.shape[:-1], self.action_dim), dtype=rnn_out.dtype)
+            next_in = jnp.concatenate([rnn_out, oh_curr_action], axis=-1)
+            h_next = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(next_in)
+            h_next = activation(h_next)
+            pred_next_emb = nn.Dense(
+                zt.shape[-1], kernel_init=orthogonal(1.0), bias_init=constant(0.0)
+            )(h_next)
+            target_next_emb = jax.lax.stop_gradient(zt)
+            next_state_out = (pred_next_emb, target_next_emb)
+
+        return new_hidden, value, pos_pred, next_state_out
 
 
 class RecurrentIPPOAC(nn.Module):
@@ -219,7 +240,7 @@ class RecurrentIPPOAC(nn.Module):
     lstm: bool = False
 
     @nn.compact
-    def __call__(self, hidden, obs):
+    def __call__(self, hidden, obs, curr_actions=None):
         actor_hidden, critic_hidden = hidden
 
         new_actor_hidden, pi, actor_pos_pred, actor_next_state = RecurrentActor(
@@ -229,19 +250,21 @@ class RecurrentIPPOAC(nn.Module):
             predict_pos=self.predict_pos,
             predict_next_state=self.predict_next_state,
             lstm=self.lstm,
-        )(actor_hidden, obs)
+        )(actor_hidden, obs, curr_actions=curr_actions)
 
-        new_critic_hidden, value, critic_pos_pred = RecurrentCritic(
+        new_critic_hidden, value, critic_pos_pred, critic_next_state = RecurrentCritic(
             activation=self.activation,
             hidden_dim=self.hidden_dim,
+            action_dim=self.action_dim,
             predict_pos=self.predict_pos,
+            predict_next_state=self.predict_next_state,
             lstm=self.lstm,
-        )(critic_hidden, obs)
+        )(critic_hidden, obs, curr_actions=curr_actions)
 
         new_hidden = (new_actor_hidden, new_critic_hidden)
         pos_pred = (actor_pos_pred, critic_pos_pred) if self.predict_pos else None
         if self.predict_next_state:
-            return new_hidden, pi, value, pos_pred, actor_next_state
+            return new_hidden, pi, value, pos_pred, (actor_next_state, critic_next_state)
         return new_hidden, pi, value, pos_pred
 
 
@@ -258,7 +281,7 @@ class RecurrentMAPPOAC(nn.Module):
     lstm: bool = False
 
     @nn.compact
-    def __call__(self, hidden, actor_obs, world_state):
+    def __call__(self, hidden, actor_obs, world_state, curr_actions=None):
         new_hidden, pi, pos_pred, next_state_out = RecurrentActor(
             action_dim=self.action_dim,
             hidden_dim=self.hidden_dim,
@@ -268,7 +291,7 @@ class RecurrentMAPPOAC(nn.Module):
             item_len=self.item_len,
             item_feat_dim=self.item_feat_dim,
             lstm=self.lstm,
-        )(hidden, actor_obs)
+        )(hidden, actor_obs, curr_actions=curr_actions)
         value = Critic(activation=self.activation, small=self.small)(world_state)
         if self.predict_next_state:
             return new_hidden, pi, value, pos_pred, next_state_out

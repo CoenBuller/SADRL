@@ -26,7 +26,7 @@ class Environment:
                 env_id=env_name,
                 num_agents=n_agents,
                 shared_rewards=False,
-                inner_steps=inner_steps,
+                num_inner_steps=inner_steps,
             )
         else:
             self.env = sj.make(

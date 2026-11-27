@@ -29,20 +29,24 @@ def next_embedding_loss(
     min_std: float = 0.1,
     var_coef: float = 0.1,
 ) -> jnp.ndarray:
-    """Predict z_{t+1} from z_t's recurrent output, masked on episode resets."""
+    """Predict direction of z_{t+1} from (rnn_out_t, a_t) via cosine distance + VICReg std hinge."""
     if pred_next_emb.shape[0] < 2:
         return jnp.zeros(())
 
     pred_t = pred_next_emb[:-1]                  # (T-1, B, D)
     target_tp1 = target_next_emb[1:]             # (T-1, B, D) already stop_gradient'd
-    valid = (1.0 - dones[:-1].astype(jnp.float32))[..., None]
+    valid = 1.0 - dones[:-1].astype(jnp.float32) # (T-1, B)
 
-    mse = jnp.sum(jnp.square(pred_t - target_tp1) * valid) / jnp.maximum(jnp.sum(valid), 1.0)
+    # Cosine distance in [0, 2]: removes the 64x sum blowup and makes norm-shrinkage useless
+    pred_norm = pred_t / (jnp.linalg.norm(pred_t, axis=-1, keepdims=True) + 1e-8)
+    target_norm = target_tp1 / (jnp.linalg.norm(target_tp1, axis=-1, keepdims=True) + 1e-8)
+    cos_dist = 1.0 - jnp.sum(pred_norm * target_norm, axis=-1)
+    pred_loss = jnp.sum(cos_dist * valid) / jnp.maximum(jnp.sum(valid), 1.0)
 
-    flat_pred = pred_t.reshape((-1, pred_t.shape[-1]))
-    std_per_dim = jnp.std(flat_pred, axis=0)
+    flat_pred = pred_norm.reshape((-1, pred_norm.shape[-1]))
+    std_per_dim = jnp.sqrt(jnp.var(flat_pred, axis=0) + 1e-4)
     var_penalty = jnp.mean(jax.nn.relu(min_std - std_per_dim))
-    return mse + var_coef * var_penalty
+    return pred_loss + var_coef * var_penalty
 
 
 def make_train_recurrent(config):
@@ -57,6 +61,7 @@ def make_train_recurrent(config):
         decay_coef=config["REP_DECAY"],
         map_h=config["MAP_H"],
         map_w=config["MAP_W"],
+        inner_steps=config.get("INNER_STEPS"),
     )
 
     num_agents = env.n_agents
@@ -97,7 +102,8 @@ def make_train_recurrent(config):
             jnp.ones((1, batch_size), dtype=jnp.float32),
             jnp.zeros((1, batch_size), dtype=jnp.int32),
         )
-        network_params = network.init(_rng, init_hidden, init_obs)
+        init_curr_actions = jnp.zeros((1, batch_size), dtype=jnp.int32)
+        network_params = network.init(_rng, init_hidden, init_obs, curr_actions=init_curr_actions)
         num_updates = config["TOTAL_TIMESTEPS"] // (config["NUM_STEPS"] * num_envs)
 
         def linear_schedule(count):
@@ -247,6 +253,7 @@ def make_train_recurrent(config):
                             params,
                             init_hstate_mb,
                             traj_batch.obs,
+                            curr_actions=traj_batch.action,
                         )
                         _, pi, value, pos_pred = net_out[0], net_out[1], net_out[2], net_out[3]
                         next_state_out = net_out[4] if predict_next_state else None
@@ -278,15 +285,25 @@ def make_train_recurrent(config):
                             pos_loss = jnp.zeros(())
 
                         if predict_next_state and next_state_out is not None:
-                            pred_next_emb, target_next_emb = next_state_out
-                            next_emb_loss = next_embedding_loss(
-                                pred_next_emb,
-                                target_next_emb,
+                            (actor_pred, actor_target), (critic_pred, critic_target) = next_state_out
+                            actor_next_emb_loss = next_embedding_loss(
+                                actor_pred,
+                                actor_target,
                                 traj_batch.done,
                                 min_std=next_var_min_std,
                                 var_coef=next_var_coef,
                             )
+                            critic_next_emb_loss = next_embedding_loss(
+                                critic_pred,
+                                critic_target,
+                                traj_batch.done,
+                                min_std=next_var_min_std,
+                                var_coef=next_var_coef,
+                            )
+                            next_emb_loss = actor_next_emb_loss + critic_next_emb_loss
                         else:
+                            actor_next_emb_loss = jnp.zeros(())
+                            critic_next_emb_loss = jnp.zeros(())
                             next_emb_loss = jnp.zeros(())
 
                         total_loss = (
@@ -296,7 +313,16 @@ def make_train_recurrent(config):
                             + config["POS_COEF"] * pos_loss
                             + next_state_coef * next_emb_loss
                         )
-                        aux_metrics = (loss_actor, loss_critic, entropy, approx_kl, pos_loss, next_emb_loss)
+                        aux_metrics = (
+                            loss_actor,
+                            loss_critic,
+                            entropy,
+                            approx_kl,
+                            pos_loss,
+                            next_emb_loss,
+                            actor_next_emb_loss,
+                            critic_next_emb_loss,
+                        )
                         return total_loss, aux_metrics
 
                     (total_loss, aux_metrics), grads = jax.value_and_grad(
@@ -344,7 +370,16 @@ def make_train_recurrent(config):
             update_state, loss_info = jax.lax.scan(_update_epoch, update_state, None, config["UPDATE_EPOCHS"])
             agent_state = update_state[0]
 
-            total_loss, (loss_actor, loss_critic, entropy, approx_kl, pos_loss, next_emb_loss) = loss_info
+            total_loss, (
+                loss_actor,
+                loss_critic,
+                entropy,
+                approx_kl,
+                pos_loss,
+                next_emb_loss,
+                actor_next_emb_loss,
+                critic_next_emb_loss,
+            ) = loss_info
 
             episode_return = returned_ep_returns.mean()
             team_return = episode_return * num_agents
@@ -371,6 +406,8 @@ def make_train_recurrent(config):
                 "losses/approx_kl": approx_kl.mean(),
                 "losses/pos_loss": pos_loss.mean(),
                 "losses/next_emb_loss": next_emb_loss.mean(),
+                "losses/actor_next_emb_loss": actor_next_emb_loss.mean(),
+                "losses/critic_next_emb_loss": critic_next_emb_loss.mean(),
             }
 
             if isinstance(traj_batch.info, dict):

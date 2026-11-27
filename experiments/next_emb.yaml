@@ -10,7 +10,7 @@ MAP_W: null
 
 # Storage
 WANDB: true
-GIF_FRAMES: 1000
+GIF_FRAMES: 0
 OUT_DIR: "results"
 
 # Reputation
@@ -34,7 +34,7 @@ POS_COEF: 0.1
 PREDICT_NEXT_STATE: true
 NEXT_STATE_COEF: 0.05
 NEXT_VAR_MIN_STD: 0.1
-NEXT_VAR_COEF: 0.1
+NEXT_VAR_COEF: 1
 
 # Optimization loop
 UPDATE_EPOCHS: 2
