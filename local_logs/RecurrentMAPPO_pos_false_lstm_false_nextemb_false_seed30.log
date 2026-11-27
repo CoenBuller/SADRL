@@ -1,0 +1,56 @@
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /home/s2631415/.netrc.
+wandb: Currently logged in as: coen-buller (magalinimario-leiden-university) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run 07zvufme
+wandb: Tracking run with wandb version 0.27.2
+wandb: Run data is saved locally in /local/s2631415/SADRL/wandb/run-20261122_222321-07zvufme
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run RecurrentMAPPO_gift_30
+wandb: ⭐️ View project at https://wandb.ai/coen-sadrl/sadrl
+wandb: 🚀 View run at https://wandb.ai/coen-sadrl/sadrl/runs/07zvufme
+Compiling RecurrentMAPPO_gift_30 training loop (this may take a few minutes)...
+Starting training on gift for 100000000 timesteps...
+2026-11-22 22:23:26.091025: W external/xla/xla/service/gpu/autotuning/dot_search_space.cc:200] All configs were filtered out because none of them sufficiently match the hints. Maybe the hints set does not contain a good representative set of valid configs?Working around this by using the full hints set instead.
+2026-11-22 22:23:26.091165: W external/xla/xla/service/gpu/autotuning/dot_search_space.cc:200] All configs were filtered out because none of them sufficiently match the hints. Maybe the hints set does not contain a good representative set of valid configs?Working around this by using the full hints set instead.
+2026-11-22 22:23:26.091190: W external/xla/xla/service/gpu/autotuning/dot_search_space.cc:200] All configs were filtered out because none of them sufficiently match the hints. Maybe the hints set does not contain a good representative set of valid configs?Working around this by using the full hints set instead.
+2026-11-22 22:23:26.091237: W external/xla/xla/service/gpu/autotuning/dot_search_space.cc:200] All configs were filtered out because none of them sufficiently match the hints. Maybe the hints set does not contain a good representative set of valid configs?Working around this by using the full hints set instead.
+2026-11-22 22:23:26.091479: W external/xla/xla/service/gpu/autotuning/dot_search_space.cc:200] All configs were filtered out because none of them sufficiently match the hints. Maybe the hints set does not contain a good representative set of valid configs?Working around this by using the full hints set instead.
+2026-11-22 22:23:26.091500: W external/xla/xla/service/gpu/autotuning/dot_search_space.cc:200] All configs were filtered out because none of them sufficiently match the hints. Maybe the hints set does not contain a good representative set of valid configs?Working around this by using the full hints set instead.
+2026-11-22 22:23:26.091515: W external/xla/xla/service/gpu/autotuning/dot_search_space.cc:200] All configs were filtered out because none of them sufficiently match the hints. Maybe the hints set does not contain a good representative set of valid configs?Working around this by using the full hints set instead.
+2026-11-22 22:23:26.091537: W external/xla/xla/service/gpu/autotuning/dot_search_space.cc:200] All configs were filtered out because none of them sufficiently match the hints. Maybe the hints set does not contain a good representative set of valid configs?Working around this by using the full hints set instead.
+Training complete!
+Saving metrics locally...
+Metrics saved to training_metrics_RecurrentMAPPO_gift_30.csv/.npz
+wandb: updating run metadata
+wandb: uploading output.log; uploading wandb-summary.json; uploading config.yaml
+wandb: uploading history steps 99928-99999, summary, console lines 2-4
+wandb: 
+wandb: Run history:
+wandb:               env_info/give_actions ▆▃█▄▅▄▆▄▄▃▂▂▁▄▃▅▅▃▃▃▃▅▂▂▄▂▅▅▄▃▃▄▄▄▃▄▄▃▃▄
+wandb: env_info/level_two_and_three_tokens ▁▁▅▅▂▁▁▁▂▁▃▃▂▁▅▆▂▃▁▂▁▂▁▄▁▁▅▁▅█▁▁▄▁▁▁▁▂▁▁
+wandb:                            env_step ▁▁▁▁▁▂▂▂▂▂▃▃▃▃▃▄▄▄▄▄▄▄▅▅▅▅▅▅▅▆▆▆▇▇▇▇▇███
+wandb:                   losses/actor_loss ▄▃▁▅▃▂▄▂▃▁▁▃▃▂▃▃▃▁▃▂▃▄▅▄▃▃▄▃▄▅▅▅▄▆▆▇▆▇██
+wandb:                    losses/approx_kl ▂▂▃▄▅▃▆█▇▅▅▄▅▃▅▅▃▄▂▃▃▂▃▂▂▃▁▂▃▂▁▂▁▁▁▁▁▁▁▁
+wandb:                  losses/critic_loss ▁▁▁▁▁▁▂▁▇▁▁▁▁▂▁▂▂▁▁▁▁▁█▁▁▁▁▁▁▁█▁▁▁▁▁▁▁▁▁
+wandb:                      losses/entropy █▅▄▃▃▃▂▂▂▃▂▁▁▂▂▂▂▂▂▃▂▂▂▂▂▂▂▂▂▂▂▂▂▃▂▂▂▃▃▃
+wandb:                     losses/pos_loss ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                   losses/total_loss ▁▁▁▁▁▂▁▁▁▁▁▂▁▁▂▁▁▂▁▂▁▁▁▁█▂▁▁▁▂▂▁▁▁▁▇▁▁▁▁
+wandb:              rollout/episode_return ▁▆▃▃▃▆▆▄▅▃▃▃▅▄▃▅▆▅▅▆▆▆▅▆▆▇▆▅▇▆█▇▇█▇▅▇▆▅▇
+wandb:                                  +8 ...
+wandb: 
+wandb: Run summary:
+wandb:               env_info/give_actions 0.0452
+wandb: env_info/level_two_and_three_tokens 0.12
+wandb:                            env_step 100000000
+wandb:                   losses/actor_loss -2e-05
+wandb:                    losses/approx_kl 0.0
+wandb:                  losses/critic_loss 4.62784
+wandb:                      losses/entropy 1.14571
+wandb:                     losses/pos_loss 0
+wandb:                   losses/total_loss 2.30244
+wandb:              rollout/episode_return 98.4
+wandb:                                  +8 ...
+wandb: 
+wandb: 🚀 View run RecurrentMAPPO_gift_30 at: https://wandb.ai/coen-sadrl/sadrl/runs/07zvufme
+wandb: ⭐️ View project at: https://wandb.ai/coen-sadrl/sadrl
+wandb: Synced 6 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20261122_222321-07zvufme/logs
